@@ -38,7 +38,29 @@ else()
 endif()
 
 include(CTest)
+add_library(askompu_desktop_controller STATIC ui/AppController.cpp ui/Finnish.cpp)
+target_link_libraries(askompu_desktop_controller PUBLIC askompu_simulator)
+
+option(ASKOMPU_BUILD_GUI "Rakenna graafinen ASkompu-simulaattori" OFF)
+if(ASKOMPU_BUILD_GUI)
+  include(cmake/DesktopDependencies.cmake)
+  add_executable(askompu-simulaattori
+    ui/Main.cpp ui/SimulatorView.cpp ui/DeviceDisplay.cpp ui/GuiSmokeCheck.cpp
+    ${ASKOMPU_ROOT}/src/ui/DisplayLayout.cpp
+    ${ASKOMPU_ROOT}/src/ui/RouteOrderFormatting.cpp)
+  target_include_directories(askompu-simulaattori PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
+  target_compile_definitions(askompu-simulaattori PRIVATE SDL_MAIN_HANDLED)
+  target_link_libraries(askompu-simulaattori PRIVATE askompu_desktop_controller askompu_imgui)
+  install(TARGETS askompu-simulaattori RUNTIME DESTINATION bin)
+  install(FILES "${imgui_SOURCE_DIR}/LICENSE.txt"
+    DESTINATION share/askompu-simulaattori RENAME ImGui-LICENSE.txt)
+  install(FILES assets/Roboto-LICENSE.txt THIRD_PARTY.md DESTINATION share/askompu-simulaattori)
+endif()
+
 if(BUILD_TESTING)
+  add_executable(controller_tests tests/AppControllerTests.cpp)
+  target_link_libraries(controller_tests PRIVATE askompu_desktop_controller)
+  add_test(NAME kayttoliittyman_ohjaus COMMAND controller_tests)
   add_executable(simulator_tests tests/SimulatorEngineTests.cpp)
   target_link_libraries(simulator_tests PRIVATE askompu_simulator)
   add_test(NAME simulaattori COMMAND simulator_tests)
