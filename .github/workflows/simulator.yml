@@ -19,7 +19,7 @@ jobs:
             preset: linux-release
           - os: ubuntu-latest
             preset: linux-clang
-          - os: windows-latest
+          - os: windows-2022 # Visual Studio 2022, kuten windows-release-presetissä
             preset: windows-release
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
