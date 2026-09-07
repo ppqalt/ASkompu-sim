@@ -15,7 +15,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             preset: linux-release
           - os: ubuntu-latest
             preset: linux-clang
@@ -50,6 +50,32 @@ jobs:
       - name: Tarkistustyökalun eristystestit
         if: matrix.preset == 'linux-release'
         run: python3 -m unittest discover -s tests -p 'test_upstream_check.py' -v
+      - name: Linux-paketti ja puretun paketin ajotarkistus
+        if: matrix.preset == 'linux-release'
+        env:
+          SDL_VIDEODRIVER: dummy
+        run: |
+          cpack --preset linux-release
+          package_root=$(mktemp -d --suffix=' ASkompu ää')
+          trap 'rm -rf "$package_root"' EXIT
+          tar -xzf build/linux-release/packages/ASkompu-simulaattori-Linux-x86_64.tar.gz -C "$package_root"
+          app="$package_root/ASkompu-simulaattori"
+          cat "$app/share/askompu-simulaattori/BUILDINFO.txt"
+          ldd "$app/bin/askompu-simulaattori"
+          if ldd "$app/bin/askompu-simulaattori" | grep -q 'not found'; then exit 1; fi
+          mkdir "$package_root/Erillinen työ" "$package_root/Kuvat ää"
+          cd "$package_root/Erillinen työ"
+          "$app/bin/askompu-simulaattori" --versio
+          "$app/bin/askompu-simulaattori" --tarkista --tarkistuskuvat "$package_root/Kuvat ää"
+          test "$(find "$package_root/Kuvat ää" -name '*.bmp' | wc -l)" -eq 3
+      - name: Tallenna Linux-paketti tarkistettavaksi
+        if: matrix.preset == 'linux-release'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ASkompu-simulaattori-Linux-x86_64
+          path: simulator/build/linux-release/packages/ASkompu-simulaattori-Linux-x86_64.tar.gz
+          if-no-files-found: error
+          retention-days: 14
       - name: Windowsin siirrettävä ZIP
         if: runner.os == 'Windows'
         run: cpack --preset windows-release
