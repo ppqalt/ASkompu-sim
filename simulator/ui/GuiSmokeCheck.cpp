@@ -29,6 +29,7 @@ GuiSmokeCheck::GuiSmokeCheck(std::string directory):outputDirectory_(std::move(d
     {"100×",[](AppController& c){require(c.multiplier()==100);}},
     {"Keskeytä",[](AppController& c){require(c.paused()&&c.engine().generatedPulseCount()>2);}},
     {"1×",[](AppController& c){require(c.multiplier()==1);}},
+    {"TRIP",[](AppController& c){require(c.engine().application().trip1DistanceMillimeters()==0);}},
     {"ALAS",screen(core::Screen::Menu)},
     {"OIKEA",screen(core::Screen::OrderEdit)},
     {"OIKEA",none},{"OIKEA",none},{"OIKEA",none},

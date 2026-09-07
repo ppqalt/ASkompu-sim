@@ -158,19 +158,42 @@ void SimulatorView::vehicle() {
 }
 
 void SimulatorView::controls() {
-  const float u=unit();section("ASkompun painikkeet");
-  const float w=(ImGui::GetContentRegionAvail().x-20*u)/3;
-  ImGui::Dummy({w,0});ImGui::SameLine();
-  if(button("YLÖS",{w,42*u}))controller_.press(core::ButtonId::Up);
-  if(button("VASEN",{w,42*u}))controller_.press(core::ButtonId::Left);
-  ImGui::SameLine();if(button("ALAS",{w,42*u}))controller_.press(core::ButtonId::Down);
-  ImGui::SameLine();if(button("OIKEA",{w,42*u}))controller_.press(core::ButtonId::Right);
-  gap(4);
-  const float half=(ImGui::GetContentRegionAvail().x-10*u)/2;
-  if(button("PISTE",{half,44*u},true))controller_.press(core::ButtonId::Point);
-  hint("Lyhyt PISTE-painallus. Tuotantoydin käsittelee pisteen vapautuksessa. Pikanäppäin: P.");
-  ImGui::SameLine();if(button("AT",{half,44*u}))controller_.press(core::ButtonId::At);
+  const float u=unit();
+  const float available=ImGui::GetContentRegionAvail().x;
+  const float budget=std::clamp(ImGui::GetIO().DisplaySize.y*.42f,240*u,480*u);
+  const float bezel=std::min(available-36*u,budget*1.5f)+36*u;
+  const float width=std::min(420*u,bezel-36*u);
+  const float left=ImGui::GetCursorPosX()+(available+bezel)/2-width-18*u;
+  const float spacing=6*u,w=(width-3*spacing)/4,h=58*u;
+  ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing,ImVec2(spacing,spacing));
+  ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding,5*u);
+  ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize,1*u);
+  auto key=[&](const char* text,const char* identity,core::ButtonId id,int direction=-1) {
+    if(button(text,{w,h}))controller_.press(id);
+    remember(identity);
+    if(direction>=0) {
+      const auto lo=ImGui::GetItemRectMin(),hi=ImGui::GetItemRectMax();
+      const ImVec2 c{(lo.x+hi.x)/2,(lo.y+hi.y)/2};
+      const ImVec2 d=direction==0?ImVec2{-1,0}:direction==1?ImVec2{0,-1}:direction==2?ImVec2{1,0}:ImVec2{0,1};
+      auto point=[&](float along,float across){return ImVec2{c.x+(d.x*along-d.y*across)*u,c.y+(d.y*along+d.x*across)*u};};
+      auto* draw=ImGui::GetWindowDrawList();const auto color=ImGui::GetColorU32(ImGuiCol_Text);
+      draw->AddLine(point(-12,0),point(1,0),color,7*u);
+      draw->AddTriangleFilled(point(13,0),point(0,-11),point(0,11),color);
+    }
+  };
+  ImGui::SetCursorPosX(left);
+  key("VP","PISTE",core::ButtonId::Point);
+  hint("VP / PISTE: kirjaa piste. Pikanäppäin: P. Pitkä painallus löytyy lisävalikosta.");
+  ImGui::SameLine();key("##VASEN","VASEN",core::ButtonId::Left,0);hint("VASEN — vasen nuolinäppäin.");
+  ImGui::SameLine();key("##YLÖS","YLÖS",core::ButtonId::Up,1);hint("YLÖS — nuolinäppäin ylös.");
+  ImGui::SameLine();key("##OIKEA","OIKEA",core::ButtonId::Right,2);hint("OIKEA — oikea nuolinäppäin.");
+  ImGui::SetCursorPosX(left);
+  key("TRIP","TRIP",core::ButtonId::Trip1Reset);
+  hint("Sisäinen trip-nollaus. Nollaa tuotannon asetuksen valitseman tripin.");
+  ImGui::SameLine();key("AT","AT",core::ButtonId::At);
   hint("Kirjaa AT-aika. Uusi painallus tuotannon perumisikkunassa peruu kirjauksen. Pikanäppäin: A.");
+  ImGui::SameLine();key("##ALAS","ALAS",core::ButtonId::Down,3);hint("ALAS — nuolinäppäin alas.");
+  ImGui::PopStyleVar(3);
   gap(4);
   if(ImGui::TreeNode("Pitkät painallukset ja nollaus")) {
     if(button("Pitkä VASEN",{-1,0}))controller_.longPress(core::ButtonId::Left);
@@ -320,15 +343,12 @@ void SimulatorView::render() {
     ImGui::BeginTable("Päänäkymä",2,ImGuiTableFlags_SizingStretchProp);
     ImGui::TableSetupColumn("Näyttö",ImGuiTableColumnFlags_WidthStretch);
     ImGui::TableSetupColumn("Ohjaimet",ImGuiTableColumnFlags_WidthFixed,330*u);
-    ImGui::TableNextColumn();instrument();gap(12);telemetry();
-    ImGui::TableNextColumn();vehicle();gap(18);controls();
+    ImGui::TableNextColumn();instrument();gap(8);controls();gap(12);telemetry();
+    ImGui::TableNextColumn();vehicle();
     ImGui::EndTable();
   } else {
-    instrument();gap(12);telemetry();gap(18);
-    if(ImGui::GetContentRegionAvail().x>650*u) {
-      ImGui::BeginTable("Ohjauspaneelit",2,ImGuiTableFlags_SizingStretchSame);
-      ImGui::TableNextColumn();vehicle();ImGui::TableNextColumn();controls();ImGui::EndTable();
-    } else {vehicle();gap(18);controls();}
+    instrument();gap(8);controls();gap(12);telemetry();gap(18);
+    vehicle();
   }
   gap(18);ImGui::Separator();gap(8);eventLog();
   shortcuts();dialogs();ImGui::End();
