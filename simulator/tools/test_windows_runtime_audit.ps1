@@ -47,3 +47,5 @@ target_link_libraries(external_dll PRIVATE external_dependency)
 } finally {
     Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
 }
+# Viimeisen hylkäystestin odotettu CMake-virhekoodi ei ole testisarjan tulos.
+exit 0
