@@ -2,11 +2,14 @@
 
 ## Varmennustaso
 
-Vaiheessa 2.5 Linuxin GCC- ja Clang-rakennukset, kaikki C++-testit sekä GUI:n
-Linux-ajot on varmennettu. Windows/MSVC-rakennus, ZIP-paketointi ja paketista
-ajettava SDL-tarkistus on määritelty GitHub Actionsiin. **Näitä Windows-töitä
-ei ole vielä ajettu tässä muutoksessa. Windows 11 -ajo on manuaalisesti
-varmentamatta.** CI:n Windows Server -ajokaan ei korvaa Windows 11 -työpöytätestiä.
+v0.2.5 on simulaattorin ensimmäinen esikatselujulkaisu. Windows-paketti
+hyväksytään vasta, kun GitHub Actionsin Windows Server 2022 / Visual Studio
+2022 -työ rakentaa MSVC x64 -ohjelman, suorittaa kaikki C++-testit, tarkistaa
+DLL-riippuvuudet ja ajaa puretun ZIPin SDL-tarkistuksen onnistuneesti.
+Julkaistavan commitin tarkistustulokset ja lataukset kirjataan
+[oman forkin julkaisusivulle](https://github.com/ppqalt/ASkompu-sim/releases/tag/v0.2.5).
+**Windows 11 -ajo on manuaalisesti varmentamatta.** CI:n Windows Server
+-ajo ei korvaa Windows 11 -työpöytätestiä.
 
 ## Kehittäjän komennot
 
@@ -78,8 +81,10 @@ ja [MSVC:n dokumentoitua /MT-mallia](https://learn.microsoft.com/en-us/cpp/build
 Tavoite on, ettei vastaanottajan tarvitse asentaa VC++ Redistributablea.
 Windows 11:n omia järjestelmäkirjastoja käytetään silti. CPackin asennusvaihe
 käyttää saman MSVC-asennuksen dumpbiniä riippuvuuksien tarkistamiseen:
-puuttuva DLL, System32:n ulkopuolinen DLL tai VC-runtime-DLL estää paketin
-hyväksymisen. Järjestelmässä sattumalta oleva VC-runtime ei siis riitä
+puuttuva DLL tai nimettyjen Windows-järjestelmäkirjastojen ulkopuolinen
+riippuvuus (myös VC-runtime-DLL) estää paketin hyväksymisen. Tunnettujen
+System32-kirjastojen kohdalla rekursio päättyy käyttöjärjestelmärajaan;
+niiden omia valinnaisia sisäisiä DLL-riippuvuuksia ei paketoida. Järjestelmässä sattumalta oleva VC-runtime ei siis riitä
 läpäisemään tarkistusta. Debug-, 32-bittinen, muu kuin MSVC- tai
 järjestelmä-SDL:ää käyttävä rakennus ei kelpaa tähän julkaisupolkuun.
 

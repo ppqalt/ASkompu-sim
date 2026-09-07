@@ -51,16 +51,19 @@ cpack --preset windows-release
 
 Paketti on `build/windows-release/packages/ASkompu-simulaattori-windows-x64.zip`.
 Vastaanottaja purkaa sen ja kaksoisnapsauttaa `askompu-simulaattori.exe`:ä.
-Kehitystyökaluja tai erillistä asennusta ei tarvita tavoitellussa julkaisussa.
+Kehitystyökaluja tai erillistä asennusta ei tarvita julkaistun paketin ajamiseen.
 Lyhyt vastaanottajan ohje on [release/README-windows.txt](release/README-windows.txt).
 [Windows-kehittäjän ohje ja manuaalinen tarkistuslista](docs/WINDOWS.md)
 kuvaavat runtime-ratkaisun, paketin rakenteen ja tarkistukset.
 
-**Windows/MSVC-rakennusta tai Windows-pakettia ei ole vielä varmennettu
-Windowsilla tässä muutoksessa.** GitHub Actions sisältää niiden tarkistukset,
-mutta workflow on ensin vietävä GitHubiin kehittäjän omalla päätöksellä ja
-ajettava onnistuneesti. Windows 11 -ajo on lisäksi manuaalisesti varmentamatta.
-Linuxin GCC- ja Clang-GUI-rakennukset sekä testit on varmennettu paikallisesti.
+Ensimmäinen simulaattorijulkaisu on **v0.2.5-esikatseluversio**. Julkaisun
+hyväksyntä edellyttää Windows/MSVC-rakennuksen, kaikkien testien, DLL-auditin
+ja puretun ZIPin automaattisen ajotarkistuksen onnistumista GitHub Actionsissa.
+Todelliset tarkistustulokset ja lataukset kirjataan
+[oman forkin julkaisusivulle](https://github.com/ppqalt/ASkompu-sim/releases/tag/v0.2.5).
+**Windows 11 -työpöytäajo on edelleen manuaalisesti varmentamatta.**
+Simulaattori on työpöydän kehitys- ja kokeilutyökalu, ei alkuperäisen
+firmwaren tuotantojulkaisu tai turvallisuussertifioitu ajoneuvon navigointilaite.
 
 Windows-julkaisussa SDL ja MSVC-runtime linkitetään staattisesti; fontti on
 EXE:n sisällä. CPackin DLL-auditin tulee vahvistaa, että jäljellä ovat vain
@@ -70,7 +73,12 @@ VC++ Redistributablea. CI ei julkaise GitHub Releasea automaattisesti.
 Linuxin tarkistuspaketin saa komennolla `cpack --preset linux-release`.
 Se syntyy `build/linux-release/packages/`-hakemistoon; Linux-paketti käyttää
 edelleen käyttöjärjestelmän jaetun C/C++-runtimekirjaston palveluja eikä ole
-yleispätevä eri jakeluille tarkoitettu binaarijulkaisu.
+yleispätevä eri jakeluille tarkoitettu binaarijulkaisu. CI:n ladattava
+esikatselupaketti rakennetaan Ubuntu 24.04 x64:llä ja sen purettu ohjelma
+tarkistetaan SDL:n dummy-ajurilla erillisessä ääkköspolussa. Paketin
+näyttöpolku on X11 (Wayland-istunnossa XWayland), ei natiivi Wayland.
+Binaari tarvitsee vähintään GLIBC_2.38- ja GLIBCXX_3.4.32-symbolit sekä
+X11:n ajonaikaiset kirjastot; kehitystyökaluja ei tarvita.
 
 ## Riippuvuudet ja alatason CMake-komennot
 
@@ -410,9 +418,10 @@ ctest --test-dir simulator/build -C Release --output-on-failure
 ```
 
 MSVC:lle asetetaan UTF-8-lähde- ja merkkijonokoodaus. Moottorissa ei ole
-POSIX-, Win32- tai kuorirajapintoja. Linux-rakennus on varmennettu GCC:llä
-ja Clangilla. Windows-rakennusta ja -ajoa ei ole tässä vaiheessa varmennettu
-Windows-koneella. Myös yllä kuvatun GUI:n Windows-varmennus on vielä tehtävä.
+POSIX-, Win32- tai kuorirajapintoja. CI tarkistaa Linuxin GCC- ja Clang-
+rakennukset sekä Windowsin MSVC-rakennuksen. Julkaisun toteutuneet
+tarkistukset kerrotaan julkaisusivulla; Windows 11:n manuaalinen työpöytäajo
+on vielä tekemättä.
 
 ## Testit ja nykyiset regressiotestit
 
@@ -516,7 +525,7 @@ myös; reset aloittaa uuden aikajanan.
   alusta; varaston säilytyssopimus kuuluu myöhempään vaiheeseen.
 - Ei tiedostojen tuontia/vientiä, tallennettua toistoa, verkkoa, Bluetoothia
   tai laitekytkentää. Ajomääräys ja asetukset ovat vain ajon muistissa.
-- Windows/MSVC sekä usean näytön vaihtuva DPI ja
+- Windows 11:n manuaalinen työpöytäajo, usean näytön vaihtuva DPI ja
   ruudunlukijan käyttö on vielä varmennettava erikseen.
 - Vaiheessa 3 kannattaa määrittää versioitu skenaario-/toistotiedosto ja
   tallennusmalli sekä hyödyntää moottorin valmista komentojonoa. GUI pysyy

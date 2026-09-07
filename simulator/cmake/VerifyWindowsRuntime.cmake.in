@@ -5,24 +5,30 @@ endif()
 set(CMAKE_GET_RUNTIME_DEPENDENCIES_PLATFORM windows+pe)
 set(CMAKE_GET_RUNTIME_DEPENDENCIES_TOOL dumpbin)
 set(CMAKE_GET_RUNTIME_DEPENDENCIES_COMMAND "@ASKOMPU_DUMPBIN@")
+file(TO_CMAKE_PATH "$ENV{SystemRoot}" system_root)
+# Lopeta rekursio vain nimetyissä, System32:sta löytyneissä Windows-rajapinnoissa.
+# Käyttöjärjestelmän DLL:ien omat valinnaiset riippuvuudet eivät kuulu pakettiin.
+# Älä sulje koko System32:ta pois: sinne asennettu VC-runtime on yhä hylättävä.
+set(windows_libraries
+  advapi32 comdlg32 gdi32 imm32 kernel32 ole32 oleaut32 setupapi shell32
+  shlwapi user32 version winmm ws2_32)
+set(windows_files)
+foreach(library IN LISTS windows_libraries)
+  list(APPEND windows_files "${system_root}/System32/${library}.dll")
+endforeach()
+execute_process(COMMAND "@ASKOMPU_DUMPBIN@" /DEPENDENTS
+  "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/askompu-simulaattori.exe"
+  COMMAND_ERROR_IS_FATAL ANY)
 file(GET_RUNTIME_DEPENDENCIES
   EXECUTABLES "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/askompu-simulaattori.exe"
   RESOLVED_DEPENDENCIES_VAR resolved
   UNRESOLVED_DEPENDENCIES_VAR unresolved
-  PRE_EXCLUDE_REGEXES "^[Aa][Pp][Ii]-" "^[Ee][Xx][Tt]-")
+  PRE_EXCLUDE_REGEXES "^[Aa][Pp][Ii]-" "^[Ee][Xx][Tt]-"
+  POST_EXCLUDE_FILES ${windows_files})
 if(unresolved)
   message(FATAL_ERROR "Windows-paketista puuttuvia DLL-riippuvuuksia: ${unresolved}")
 endif()
-file(TO_CMAKE_PATH "$ENV{SystemRoot}" system_root)
-string(TOLOWER "${system_root}/system32/" system_prefix)
-foreach(dependency IN LISTS resolved)
-  file(TO_CMAKE_PATH "${dependency}" normalized)
-  string(TOLOWER "${normalized}" normalized)
-  string(FIND "${normalized}" "${system_prefix}" prefix_position)
-  get_filename_component(dll "${normalized}" NAME)
-  # VC-runtime ei kelpaa edes runnerin System32:sta: loppukäyttäjällä sitä ei välttämättä ole.
-  if(NOT prefix_position EQUAL 0 OR dll MATCHES "^(msvcp|vcruntime|concrt|vcomp)[0-9]")
-    message(FATAL_ERROR "Staattisessa julkaisussa odottamaton DLL: ${dependency}")
-  endif()
-endforeach()
+if(resolved)
+  message(FATAL_ERROR "Staattisessa julkaisussa odottamaton DLL: ${resolved}")
+endif()
 message(STATUS "Windows-paketin riippuvuudet: vain Windowsin järjestelmäkirjastot")

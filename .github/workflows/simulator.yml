@@ -76,6 +76,10 @@ jobs:
           path: simulator/build/linux-release/packages/ASkompu-simulaattori-Linux-x86_64.tar.gz
           if-no-files-found: error
           retention-days: 14
+      - name: Windowsin DLL-auditin hyväksyntä- ja hylkäystestit
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./tools/test_windows_runtime_audit.ps1 -AuditScript ./build/windows-release/VerifyWindowsRuntime.cmake
       - name: Windowsin siirrettävä ZIP
         if: runner.os == 'Windows'
         run: cpack --preset windows-release
