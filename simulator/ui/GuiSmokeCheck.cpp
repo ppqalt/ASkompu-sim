@@ -41,7 +41,8 @@ GuiSmokeCheck::GuiSmokeCheck(std::string directory):outputDirectory_(std::move(d
     {"Aloita alusta",[](AppController& c){require(c.resetPending());}},
     {"Peruuta",[](AppController& c){require(!c.resetPending()&&c.engine().application().hasRouteOrder());}},
     {"Aloita alusta",[](AppController& c){require(c.resetPending());}},
-    {"Aloita alusta##vahvista",[](AppController& c){require(c.engine().monotonicMicroseconds()==0&&c.engine().generatedPulseCount()==0&&c.paused());}}
+    {"Aloita alusta##vahvista",[](AppController& c){require(c.engine().monotonicMicroseconds()==0&&c.engine().generatedPulseCount()==0&&c.paused());}},
+    {"Ohje",none},{"Tietoja simulaattorista",none},{"Tietoja simulaattorista",none},{"Sulje",none}
   };
 }
 void GuiSmokeCheck::beforeFrame(SimulatorView& view,AppController& c,SDL_Window* window) {
@@ -103,6 +104,7 @@ void GuiSmokeCheck::beforeFrame(SimulatorView& view,AppController& c,SDL_Window*
     actions_[action_].verify(c);
     std::cout<<"Hyväksytty ohjain: "<<actions_[action_].button<<'\n';
     if(action_>0&&action.button=="AT"&&actions_[action_-1].button=="AT")snapshot_=1;
+    if(action.button=="Tietoja simulaattorista"&&actions_[action_-1].button=="Ohje")snapshot_=3;
     ++action_;phase_=0;
   }
 }
@@ -112,8 +114,9 @@ void GuiSmokeCheck::afterRender(SDL_Renderer* renderer) {
   SDL_Surface* surface=SDL_CreateRGBSurfaceWithFormat(0,width,height,32,SDL_PIXELFORMAT_ARGB8888);
   if(!surface)throw std::runtime_error("Tarkistuskuvan muistia ei voitu varata");
   const int read=SDL_RenderReadPixels(renderer,nullptr,surface->format->format,surface->pixels,surface->pitch);
-  const auto path=std::filesystem::path(outputDirectory_)/(snapshot_==1?"simulaattori-ajo.bmp":"simulaattori-pieni.bmp");
-  const int saved=read==0?SDL_SaveBMP(surface,path.string().c_str()):-1;
+  const auto path=std::filesystem::u8path(outputDirectory_)/(snapshot_==1?"simulaattori-ajo.bmp":
+    snapshot_==2?"simulaattori-pieni.bmp":"simulaattori-tietoja.bmp");
+  const int saved=read==0?SDL_SaveBMP(surface,path.u8string().c_str()):-1;
   SDL_FreeSurface(surface);
   if(saved!=0)throw std::runtime_error("Tarkistuskuvan tallennus epäonnistui");
   snapshot_=0;

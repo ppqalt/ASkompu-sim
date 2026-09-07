@@ -1,57 +1,146 @@
-# ASkompu-simulaattori – vaihe 2
+# ASkompu-simulaattori – vaihe 2.5
 
 Natiivi, suomenkielinen työpöytäsimulaattori oikean ASkompu-tuotantoytimen
 ympärillä. SDL2 ja Dear ImGui piirtävät käyttöliittymän; vaiheen 1
 deterministinen `SimulatorEngine` tuottaa ajan, pulssit ja painikesyötteet.
 Moottoria voi edelleen käyttää ja testata ilman graafisia riippuvuuksia.
 
-## GUI:n rakentaminen ja käynnistäminen Linuxilla
+## Vaiheen 2.5 kehittäjän pikapolku
 
-Tarvitaan CMake 3.16 tai uudempi, C/C++17-kääntäjä sekä SDL:n käyttämän
-Linux-näyttöjärjestelmän kehityskirjastot (X11 tai Wayland). Suorita
-repositorion juuresta:
+Tarvitaan **CMake 3.25+** ja C/C++17-kääntäjä. Komennot ajetaan
+`simulator`-hakemistossa, ei repositorion juuressa. Linuxilla tarvitaan myös
+Make ja SDL:n käyttämän X11- tai Wayland-järjestelmän kehityskirjastot.
+Debian/Ubuntu-ympäristössä X11-polun kirjastot voi asentaa esimerkiksi näin:
 
 ```sh
-cmake -S simulator -B simulator/build-desktop -DCMAKE_BUILD_TYPE=Release -DASKOMPU_BUILD_GUI=ON
-cmake --build simulator/build-desktop --parallel
+sudo apt-get install build-essential cmake libx11-dev libxext-dev libxcursor-dev libxi-dev libxrandr-dev libxss-dev
+```
+
+```sh
+cd simulator
+cmake --preset linux-release
+cmake --build --preset linux-release
+ctest --preset linux-release
+./build/linux-release/askompu-simulaattori
+```
+
+| Preset | Sisältö |
+| --- | --- |
+| `linux-release` | GCC, Release, GUI ja kaikki C++-testit |
+| `linux-debug` | GCC, Debug, GUI ja kaikki C++-testit |
+| `linux-clang` | Clang, Release, GUI ja kaikki C++-testit |
+| `linux-tests` | GCC, Release, kaikki C++-testit ilman GUI-riippuvuuksia |
+| `windows-release` | Visual Studio 2022 / MSVC x64, GUI, kaikki C++-testit ja siirrettävä ZIP |
+
+Kaikki presetit toimivat configure-, build- ja test-komennoissa samalla
+nimellä. Rakennukset pysyvät erillisissä `build/<preset>`-hakemistoissa.
+Paikalliset omat säädöt kuuluvat Gitistä ohitettuun `CMakeUserPresets.json`:iin.
+Presetit eivät sisällä konekohtaisia polkuja.
+
+## Windows-kehittäjän polku ja vastaanottajan ZIP
+
+Asenna Visual Studio 2022:n C++-työpöytätyökalut ja Windows SDK sekä
+CMake 3.25+. Aja `simulator`-hakemistossa:
+
+```powershell
+cmake --preset windows-release
+cmake --build --preset windows-release
+ctest --preset windows-release
+cpack --preset windows-release
+```
+
+Paketti on `build/windows-release/packages/ASkompu-simulaattori-windows-x64.zip`.
+Vastaanottaja purkaa sen ja kaksoisnapsauttaa `askompu-simulaattori.exe`:ä.
+Kehitystyökaluja tai erillistä asennusta ei tarvita tavoitellussa julkaisussa.
+Lyhyt vastaanottajan ohje on [release/README-windows.txt](release/README-windows.txt).
+[Windows-kehittäjän ohje ja manuaalinen tarkistuslista](docs/WINDOWS.md)
+kuvaavat runtime-ratkaisun, paketin rakenteen ja tarkistukset.
+
+**Windows/MSVC-rakennusta tai Windows-pakettia ei ole vielä varmennettu
+Windowsilla tässä muutoksessa.** GitHub Actions sisältää niiden tarkistukset,
+mutta workflow on ensin vietävä GitHubiin kehittäjän omalla päätöksellä ja
+ajettava onnistuneesti. Windows 11 -ajo on lisäksi manuaalisesti varmentamatta.
+Linuxin GCC- ja Clang-GUI-rakennukset sekä testit on varmennettu paikallisesti.
+
+Windows-julkaisussa SDL ja MSVC-runtime linkitetään staattisesti; fontti on
+EXE:n sisällä. CPackin DLL-auditin tulee vahvistaa, että jäljellä ovat vain
+Windowsin omat järjestelmäriippuvuudet. Vastaanottajaa ei ohjata asentamaan
+VC++ Redistributablea. CI ei julkaise GitHub Releasea automaattisesti.
+
+Linuxin tarkistuspaketin saa komennolla `cpack --preset linux-release`.
+Se syntyy `build/linux-release/packages/`-hakemistoon; Linux-paketti käyttää
+edelleen käyttöjärjestelmän jaetun C/C++-runtimekirjaston palveluja eikä ole
+yleispätevä eri jakeluille tarkoitettu binaarijulkaisu.
+
+## Riippuvuudet ja alatason CMake-komennot
+
+SDL 2.32.10 ja Dear ImGui 1.91.9b säilyvät versio- ja SHA-256-lukittuina.
+Presetit hakevat lisäksi Unity 2.6.1:n ja tarkistavat sen tiivisteen, jotta
+kaikki aiemmat host-testit saa ilman PlatformIO-asennusta. Ensimmäinen
+määritys tarvitsee verkkoyhteyden. [THIRD_PARTY.md](THIRD_PARTY.md) kuvaa
+lisenssit. Desktop-riippuvuuksia ei lisätä firmware-rakennukseen.
+
+Alatason komennot toimivat edelleen repositorion juuresta:
+
+```sh
+cmake -S simulator -B simulator/build-desktop -DCMAKE_BUILD_TYPE=Release -DASKOMPU_BUILD_GUI=ON -DASKOMPU_FETCH_UNITY=ON
+cmake --build simulator/build-desktop --parallel 4
 ctest --test-dir simulator/build-desktop --output-on-failure
 ./simulator/build-desktop/askompu-simulaattori
 ```
 
-GUI-valinta on oletuksena pois päältä. Kun se otetaan käyttöön, CMake hakee
-SDL 2.32.10:n ja Dear ImGui 1.91.9b:n versiolukitut lähdearkistot ja tarkistaa
-SHA-256-tiivisteet. Ensimmäinen määritys tarvitsee verkkoyhteyden. SDL
-rakennetaan oletuksena staattisena; käyttöjärjestelmän näyttökirjastoja
-käytetään edelleen. PlatformIO-riippuvuuksia ei muuteta.
+`ASKOMPU_BUILD_GUI` ja `ASKOMPU_FETCH_UNITY` ovat ilman presetiä oletuksena
+OFF. Tämä säilyttää offline-moottorirakennuksen. Oma Unity voidaan antaa
+`ASKOMPU_UNITY_SOURCE_DIR`:llä. Valmiit lähdehakemistot voi antaa
+`FETCHCONTENT_SOURCE_DIR_SDL`, `FETCHCONTENT_SOURCE_DIR_IMGUI` ja
+`FETCHCONTENT_SOURCE_DIR_UNITY_SOURCES` -valinnoilla. Lähteiden pitää vastata
+lukittuja versioita; oma lähdehakemisto ohittaa arkiston latauksen ja sen
+SHA-tarkistuksen.
 
-Vaihtoehtoisesti `-DASKOMPU_USE_SYSTEM_SDL=ON` käyttää asennettua
-SDL2 CMake CONFIG -pakettia (vähintään 2.0.18). ImGui haetaan edelleen.
-Offline-rakennuksessa valmiit, oikeanversion lähdehakemistot voi antaa
-CMake-valinnoilla `FETCHCONTENT_SOURCE_DIR_SDL` ja
-`FETCHCONTENT_SOURCE_DIR_IMGUI`. Roboto Medium -fontti sisällytetään
-suoritettavaan tiedostoon; ajonaikaista fonttipolkua ei tarvita.
-Lisenssit ja lähteet on kuvattu tiedostossa [THIRD_PARTY.md](THIRD_PARTY.md).
+`ASKOMPU_USE_SYSTEM_SDL=ON` on valinnainen kehittäjäpolku SDL2 CMake CONFIG
+-paketille (vähintään 2.0.18). Siirrettävä Windows-julkaisu vaatii haetun
+SDL:n; kehitysvaihtoehdot eivät saa hiljaa muuttaa julkaisutiedostoa.
 
-GUI:n puhdas lähdehaku, GCC-rakennus ja näkyvä ajo on varmennettu Linuxilla.
+## Versio ja lähteiden tunnistus
 
-## GUI:n Windows-rakennuspolku
+Ohje → Tietoja simulaattorista näyttää version, rakennuslajin, lähderevision,
+työpuun muutosmerkinnän, yhteisen upstream-pohjan ja lähdetiivisteet.
+`--versio` ja paketin `BUILDINFO.txt` sisältävät täydet tunnisteet.
+Tiedot syntyvät rakennettaessa, eivät ajonaikaisilla Git-kutsuilla.
 
-Visual Studion C++-kehittäjäympäristössä, jossa CMake on käytettävissä:
+Yhteinen upstream-pohja on HEADin ja paikallisen `upstream/main`:n merge-base,
+ei verkosta haettu uusin versio. Git-tiedon puuttuessa näytetään `tuntematon`.
+Myös Git-metatiedoton lähdearkisto rakentuu. Erilliset SHA-256-tiivisteet
+ASkompun `src/include`-lähteistä ja simulaattorin rakennuslähteistä erottavat
+paikalliset muutokset. Ne tunnistavat todelliset lähdetavut, joten myös
+rivinvaihtojen muutos voi muuttaa tiivistettä.
 
-```powershell
-cmake -S simulator -B simulator/build-desktop -DASKOMPU_BUILD_GUI=ON
-cmake --build simulator/build-desktop --config Release
-ctest --test-dir simulator/build-desktop -C Release --output-on-failure
-.\simulator\build-desktop\Release\askompu-simulaattori.exe
+## Upstream-päivitys ja CI
+
+`origin` on `ppqalt/ASkompu-sim`, `upstream` on `Mikky100/ASkompu`.
+Suositeltu työnkulku on `fetch` ja tietoisesti tehty merge erillisessä
+päivityshaarassa. [Upstream-ohje](docs/UPSTREAM.md) sisältää tarkat komennot,
+ristiriidan perumisen ja laadun tarkistukset. Ohjelma ei ota verkkoyhteyksiä
+eikä päivitä itseään.
+
+Puhdasta Git-haaraa voi tarkistaa Linuxilla muuttamatta sitä:
+
+```sh
+python3 simulator/tools/check_upstream.py
 ```
 
-Nämä komennot on tarkoitettu Visual Studion monikonfiguraatiogeneraattorille.
-MSVC käyttää UTF-8-koodausta. Ikkuna, syötteet ja piirto kulkevat SDL:n kautta;
-sovelluksessa ei ole POSIX-, Win32- tai kuoririippuvaista ajonaikaista koodia.
-**Windows/MSVC-rakennusta ja GUI-ajoa ei ole varmennettu Windows-koneella.**
-Linuxin onnistuminen ei korvaa tätä tarkistusta. Myöskään vaiheen 2 GUI:ta ei
-ole tässä työssä rakennettu Clangilla; vaiheen 1 moottori oli varmennettu
-sekä GCC:llä että Clangilla.
+Työkalu kloonaa HEADin väliaikaishakemistoon, hakee sinne upstream/main:n,
+yrittää commititonta mergeä ja rakentaa/testaa yhdistetyt lähteet. Lähderepoon
+ei kirjoiteta. Epäonnistuva merge tai testi palauttaa virhekoodin.
+
+GitHub Actionsin laatuportti sisältää Linux GCC:n ja Clangin sekä
+Windows/MSVC:n GUI-rakennukset ja kaikki C++-testit. GCC-työ ajaa myös SDL:n
+dummy-tarkistuksen ja upstream-työkalun eristystestit. Windows-työ muodostaa
+ZIPin, tarkistaa paketin ajon erillisestä ääkköspolusta dummy-ajurilla ja
+tallentaa hyväksytyn ZIPin workflow-artifactiksi. Molemmat firmware-kohteet
+rakennetaan kerran erillisessä Linux-työssä. Upstream-yhteensopivuustyö on
+erikseen käynnistettävä `workflow_dispatch`; se ei yhdistä kehityshaaraa,
+tee committeja, pushaa, avaa PR:iä tai julkaise Releasea.
 
 ## Käyttö
 
@@ -130,7 +219,8 @@ toteuta simulaation oikeellisuutta.
 Laitenäytön `DisplayLayout`- ja `RouteOrderFormatting`-aputoimintoja käytetään
 suoraan. Kolme aiemmin `DisplayView.cpp`:ssä ollutta lukumuotoilufunktiota
 siirrettiin muuttumattomin rungoin yhteiseen `src/ui/DisplayFormatting.h`-
-otsakkeeseen. Tämä on ainoa tuotannon näyttötiedoston muutos. GUI toteuttaa
+otsakkeeseen. Vaiheessa 2.5 otsakkeessa korjattiin PRIu64-argumenttien tyypit;
+esitystapa säilyi ennallaan. GUI toteuttaa
 oman piirron; se ei tavoittele TFT-pikseliemulaatiota.
 
 ## Graafinen käynnistystarkistus
@@ -148,7 +238,7 @@ Se ei ole kuvapikseleihin perustuva testi eikä kaikkien
 käyttöjärjestelmän syötepolkujen kattava testi. Ajo vaatii toimivan
 Linux-/Windows-työpöytäistunnon, joten se ei kuulu tavalliseen CTest-ajoon.
 
-Valinnainen `--tarkistuskuvat HAKEMISTO` tallentaa kaksi BMP-tarkistuskuvaa
+Valinnainen `--tarkistuskuvat HAKEMISTO` tallentaa kolme BMP-tarkistuskuvaa
 olemassa olevaan hakemistoon. `--ohje` näyttää komentoriviohjeen.
 
 ## Arkkitehtuuri
@@ -295,7 +385,7 @@ niitä muuttavan syötteen yhteydessä.
 
 ## Moottorin rakentaminen ilman GUI:ta Linuxilla
 
-Tarvitaan CMake 3.16 tai uudempi ja C++17-kääntäjä. Moottori ja sen omat testit
+Tarvitaan CMake 3.25 tai uudempi ja C++17-kääntäjä. Moottori ja sen omat testit
 eivät vaadi PlatformIO:ta, Unitya, verkkoyhteyttä tai käyttöliittymäkirjastoja.
 Suorita komennot ASkompu-repositorion juuresta:
 
@@ -347,13 +437,14 @@ ctest --test-dir simulator/build --output-on-failure
 ```
 
 Oman testiohjelman 23 tapauksen lisäksi näin suoritetaan 139 nykyistä
-testitapausta viidessä sarjassa. Lisäksi mukana on 12 uutta GUI:sta riippumatonta
+testitapausta viidessä sarjassa. Lisäksi mukana on 13 GUI:sta riippumatonta
 ohjaintestiä: tauko/jatkaminen, kertoimet, ruutuajan pilkkominen, jakojäännös,
-viiverajaus, askel, ajaminen, painikkeet, reset, loki, yhteinen muotoilu ja
-virhesyötteet. Yhteensä **174 tapausta seitsemässä CTest-ohjelmassa**.
-Ilman Unity-polkua suoritetaan 35 tapausta kahdessa ohjelmassa.
-Unity-polku on valinnainen ja käyttäjän antama; GUI:n ollessa pois käytöstä
-CMake ei lataa riippuvuuksia.
+viiverajaus, askel, ajaminen, painikkeet, reset, loki, yhteinen muotoilu,
+virhesyötteet ja tuotantotilan lukuraja. Yhteensä **175 tapausta seitsemässä CTest-ohjelmassa**.
+Ilman Unity-polkua suoritetaan 36 tapausta kahdessa ohjelmassa.
+Unity-polku on valinnainen ja käyttäjän antama. Vaihtoehtona
+`ASKOMPU_FETCH_UNITY=ON` hakee lukitun Unityn automaattisesti. Kun sekä
+GUI että Unity-haku ovat OFF, CMake ei lataa riippuvuuksia.
 Jos riippuvuus on muualla, anna sen `src`-hakemisto. Vanhojen testien omat
 englanninkieliset nimet ja Unityn tulosteet ovat ennallaan.
 
@@ -395,7 +486,7 @@ Pitkän painalluksen tai pidetyn nollauksen voi syöttää `buttonEvent`-metodil
 käyttäen tuotannon `Press`, `Release`, `LongStart` ja `LongRepeat`-tapahtumia.
 Moottori ei lisää automaattista pitkän painalluksen tulkintaa.
 
-Vaiheen 2 käyttöliittymä lukee oikeaa `DisplayModel`-tietoa ja käyttää
+Työpöytäkäyttöliittymä lukee oikeaa `DisplayModel`-tietoa ja käyttää
 näitä komentoja. Tuotannon näyttömallissa on myös lainattuja tekstiosoittimia:
 pidempään säilytettävään käyttöliittymä- tai toistotallenteeseen niiden sisältö
 pitää kopioida. Käyttöliittymä voi määrätä, kuinka paljon aikaa edistetään
@@ -425,7 +516,7 @@ myös; reset aloittaa uuden aikajanan.
   alusta; varaston säilytyssopimus kuuluu myöhempään vaiheeseen.
 - Ei tiedostojen tuontia/vientiä, tallennettua toistoa, verkkoa, Bluetoothia
   tai laitekytkentää. Ajomääräys ja asetukset ovat vain ajon muistissa.
-- Windows/MSVC, GUI:n Clang-rakennus sekä usean näytön vaihtuva DPI ja
+- Windows/MSVC sekä usean näytön vaihtuva DPI ja
   ruudunlukijan käyttö on vielä varmennettava erikseen.
 - Vaiheessa 3 kannattaa määrittää versioitu skenaario-/toistotiedosto ja
   tallennusmalli sekä hyödyntää moottorin valmista komentojonoa. GUI pysyy

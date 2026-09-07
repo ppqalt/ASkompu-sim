@@ -18,12 +18,14 @@ inline void formatTrip(char* text, size_t size, int64_t distanceMm) {
   if (meters < 10000ULL) {
     std::snprintf(text, size, "%s%" PRIu64 ".%03" PRIu64,
                   negative ? "-" : "",
-                  meters / 1000ULL, meters % 1000ULL);
+                  static_cast<uint64_t>(meters / 1000ULL),
+                  static_cast<uint64_t>(meters % 1000ULL));
   } else {
     const uint64_t tenMeters = meters / 10ULL;
     std::snprintf(text, size, "%s%" PRIu64 ".%02" PRIu64,
                   negative ? "-" : "",
-                  tenMeters / 100ULL, tenMeters % 100ULL);
+                  static_cast<uint64_t>(tenMeters / 100ULL),
+                  static_cast<uint64_t>(tenMeters % 100ULL));
   }
 }
 

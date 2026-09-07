@@ -1,0 +1,4 @@
+#pragma once
+static const unsigned char embeddedFont[] = {
+@ASKOMPU_FONT_BYTES@
+};

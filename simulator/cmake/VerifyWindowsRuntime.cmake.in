@@ -1,0 +1,28 @@
+# Suoritetaan asennuksessa/CPackissa; ei hyväksytä vahingossa kehitys-DLL:iä.
+if(NOT CMAKE_INSTALL_CONFIG_NAME STREQUAL "Release")
+  message(FATAL_ERROR "Siirrettävä Windows-paketti tehdään vain Release-määrityksestä")
+endif()
+set(CMAKE_GET_RUNTIME_DEPENDENCIES_PLATFORM windows+pe)
+set(CMAKE_GET_RUNTIME_DEPENDENCIES_TOOL dumpbin)
+set(CMAKE_GET_RUNTIME_DEPENDENCIES_COMMAND "@ASKOMPU_DUMPBIN@")
+file(GET_RUNTIME_DEPENDENCIES
+  EXECUTABLES "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/askompu-simulaattori.exe"
+  RESOLVED_DEPENDENCIES_VAR resolved
+  UNRESOLVED_DEPENDENCIES_VAR unresolved
+  PRE_EXCLUDE_REGEXES "^[Aa][Pp][Ii]-" "^[Ee][Xx][Tt]-")
+if(unresolved)
+  message(FATAL_ERROR "Windows-paketista puuttuvia DLL-riippuvuuksia: ${unresolved}")
+endif()
+file(TO_CMAKE_PATH "$ENV{SystemRoot}" system_root)
+string(TOLOWER "${system_root}/system32/" system_prefix)
+foreach(dependency IN LISTS resolved)
+  file(TO_CMAKE_PATH "${dependency}" normalized)
+  string(TOLOWER "${normalized}" normalized)
+  string(FIND "${normalized}" "${system_prefix}" prefix_position)
+  get_filename_component(dll "${normalized}" NAME)
+  # VC-runtime ei kelpaa edes runnerin System32:sta: loppukäyttäjällä sitä ei välttämättä ole.
+  if(NOT prefix_position EQUAL 0 OR dll MATCHES "^(msvcp|vcruntime|concrt|vcomp)[0-9]")
+    message(FATAL_ERROR "Staattisessa julkaisussa odottamaton DLL: ${dependency}")
+  endif()
+endforeach()
+message(STATUS "Windows-paketin riippuvuudet: vain Windowsin järjestelmäkirjastot")

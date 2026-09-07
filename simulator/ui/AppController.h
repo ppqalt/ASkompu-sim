@@ -2,6 +2,8 @@
 
 #include <deque>
 #include <string>
+#include <utility>
+#include <vector>
 #include "engine/SimulatorEngine.h"
 
 namespace simulator::desktop {
@@ -19,6 +21,11 @@ class AppController {
   static constexpr size_t logCapacity = 512;
   explicit AppController(const InitialState& initial = InitialState{});
   const SimulatorEngine& engine() const { return engine_; }
+  core::DisplayModel displayModel() const { return engine_.displayModel(); }
+  uint32_t millimetersPerPulse() const;
+  std::vector<std::pair<std::string, std::string>> diagnostics() const;
+  const domain::EventRecord* applicationEvent(size_t index) const;
+  size_t applicationEventCount() const;
   bool paused() const { return paused_; }
   unsigned multiplier() const { return multiplier_; }
   bool resetPending() const { return resetPending_; }

@@ -7,10 +7,44 @@
 #include <stdexcept>
 #include <utility>
 #include "Finnish.h"
+#include "ui/RouteOrderFormatting.h"
 
 namespace simulator::desktop {
 AppController::AppController(const InitialState& initial) : engine_(initial) {
   append("Simulaattori valmis · aseta ASkompun kellonaika");
+}
+std::vector<std::pair<std::string, std::string>> AppController::diagnostics() const {
+  const auto& app = engine_.application();
+  const auto& competition = app.competition();
+  std::vector<std::pair<std::string, std::string>> rows;
+  rows.emplace_back("Näyttö", screenName(app.screen()));
+  if (app.screen() == core::Screen::Menu) {
+    const auto model = displayModel();
+    rows.emplace_back("Valikko", model.menu.title ? model.menu.title : "");
+  }
+  rows.emplace_back("Pulssimäärä", std::to_string(engine_.generatedPulseCount()));
+  rows.emplace_back("Kilpailu", competitionName(competition.state()));
+  const auto* route = app.currentRouteOrder();
+  rows.emplace_back("Ajomääräys", route ? std::to_string(route->segments.size()) + " pisteväliä" : "Ei ajomääräystä");
+  if (const auto* current = competition.currentSegment()) {
+    char text[24];
+    ui::formatDriveSegmentRange(text, sizeof(text), *current);
+    rows.emplace_back("Reittipiste", text);
+  }
+  rows.emplace_back("Kilpailumatka", distanceText(competition.physicalDistanceMillimeters()));
+  rows.emplace_back("Kokonaispisteet", std::to_string(competition.totalPoints()));
+  rows.emplace_back("Kellon käyntiaika", durationText(engine_.clock().elapsedSinceSetMilliseconds() * 1000));
+  rows.emplace_back("Ohitettu ruutuviive", std::to_string(discardedHostNs_ / 1000000) + " ms");
+  return rows;
+}
+const domain::EventRecord* AppController::applicationEvent(size_t index) const {
+  return engine_.application().eventRepository().at(index);
+}
+size_t AppController::applicationEventCount() const {
+  return engine_.application().eventRepository().count();
+}
+uint32_t AppController::millimetersPerPulse() const {
+  return engine_.application().millimetersPerPulse();
 }
 void AppController::append(std::string text, bool applicationEvent, size_t index) {
   if (log_.size() == logCapacity) log_.pop_front();

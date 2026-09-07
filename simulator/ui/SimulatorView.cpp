@@ -2,10 +2,11 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cfloat>
 #include <string>
 #include "DeviceDisplay.h"
 #include "Finnish.h"
-#include "ui/RouteOrderFormatting.h"
+#include "BuildInformation.h"
 
 namespace simulator::desktop {
 namespace {
@@ -99,7 +100,7 @@ void SimulatorView::transport() {
 
 void SimulatorView::instrument() {
   const float u=unit();
-  const auto model=controller_.engine().displayModel();
+  const auto model=controller_.displayModel();
   section("ASkompun näyttö");
   const auto start=ImGui::GetCursorScreenPos();
   const float width=ImGui::GetContentRegionAvail().x;
@@ -185,33 +186,18 @@ void SimulatorView::controls() {
 }
 
 void SimulatorView::telemetry() {
-  const auto& e=controller_.engine();const auto& a=e.application();
-  const float u=unit();
+  const auto model=controller_.displayModel();
   if(ImGui::BeginTable("Matkat",3,ImGuiTableFlags_SizingStretchSame)) {
     for(int i=0;i<3;++i) {
       ImGui::TableNextColumn();label(i==0?"Trip 1":i==1?"Trip 2":"Kalibrointi");
-      ImGui::TextUnformatted((i==0?distanceText(a.trip1DistanceMillimeters()):
-        i==1?distanceText(a.trip2DistanceMillimeters()):std::to_string(a.millimetersPerPulse())+" mm/pulssi").c_str());
+      ImGui::TextUnformatted((i==0?distanceText(model.trip1.distanceMillimeters):
+        i==1?distanceText(model.trip2.distanceMillimeters):std::to_string(controller_.millimetersPerPulse())+" mm/pulssi").c_str());
     }
     ImGui::EndTable();
   }
   gap(6);
-  if(ImGui::CollapsingHeader("Sisäinen tila")) {
-    row("Näyttö",screenName(a.screen()));
-    if(a.screen()==core::Screen::Menu)row("Valikko",e.displayModel().menu.title?e.displayModel().menu.title:"");
-    row("Pulssimäärä",std::to_string(e.generatedPulseCount()));
-    row("Kilpailu",competitionName(a.competition().state()));
-    const auto* route=a.currentRouteOrder();
-    row("Ajomääräys",route?std::to_string(route->segments.size())+" pisteväliä":"Ei ajomääräystä");
-    if(const auto* current=a.competition().currentSegment()) {
-      char text[24];ui::formatDriveSegmentRange(text,sizeof(text),*current);row("Reittipiste",text);
-    }
-    row("Kilpailumatka",distanceText(a.competition().physicalDistanceMillimeters()));
-    row("Kokonaispisteet",std::to_string(a.competition().totalPoints()));
-    row("Kellon käyntiaika",durationText(e.clock().elapsedSinceSetMilliseconds()*1000));
-    row("Ohitettu ruutuviive",std::to_string(controller_.discardedHostNanoseconds()/1000000)+" ms");
-  }
-  (void)u;
+  if(ImGui::CollapsingHeader("Sisäinen tila"))
+    for(const auto& item:controller_.diagnostics())row(item.first.c_str(),item.second);
 }
 
 void SimulatorView::eventLog() {
@@ -231,7 +217,7 @@ void SimulatorView::eventLog() {
       ImGui::TextColored(muted,"%s",durationText(item.observedAtUs).c_str());
       ImGui::TableNextColumn();ImGui::TextColored(item.applicationEvent?accent:muted,"%s",item.applicationEvent?"ASkompu":"Simulaattori");
       ImGui::TableNextColumn();
-      const auto* event=item.applicationEvent?controller_.engine().application().eventRepository().at(item.repositoryIndex):nullptr;
+      const auto* event=item.applicationEvent?controller_.applicationEvent(item.repositoryIndex):nullptr;
       const auto text=event?eventDescription(*event):item.text;
       ImGui::TextWrapped("%s",text.c_str());
       if(event&&ImGui::IsItemHovered()) {
@@ -244,7 +230,7 @@ void SimulatorView::eventLog() {
     }
     ImGui::EndTable();
   }
-  if(showApplicationOnly_&&controller_.engine().application().eventRepository().count()==0)
+  if(showApplicationOnly_&&controller_.applicationEventCount()==0)
     ImGui::TextColored(muted,"Ei vielä ASkompu-tapahtumia.");
   if(followLog_)ImGui::SetScrollHereY(1);
   ImGui::EndChild();
@@ -279,12 +265,25 @@ void SimulatorView::dialogs() {
   }
   if(helpOpen_){ImGui::OpenPopup("Käyttöohje");helpOpen_=false;}
   ImGui::SetNextWindowSize({std::min(590*u,ImGui::GetIO().DisplaySize.x-30*u),0},ImGuiCond_Always);
+  ImGui::SetNextWindowSizeConstraints({0,0},{FLT_MAX,ImGui::GetIO().DisplaySize.y-30*u});
   if(ImGui::BeginPopupModal("Käyttöohje",nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {
     ImGui::TextWrapped("Aloita asettamalla kellonaika ASkompun painikkeilla. OIKEA siirtyy tunneista minuutteihin ja hyväksyy ajan. Avaa sen jälkeen ajomääräys YLÖS/ALAS-painikkeella avautuvasta valikosta.");
     gap();ImGui::TextWrapped("Nopeus ohjaa ajoneuvoa. Pysäytä asettaa nopeudeksi nollan; Keskeytä pysäyttää simuloidun ajan. Askel etenee aina 0,1 sekuntia. Aloita alusta poistaa nykyisen ajon myös muistista.");
     gap();ImGui::TextWrapped("Näppäimistö: nuolet = suuntapainikkeet, P = PISTE, A = AT, R = peruutus, S = pysäytä, N = askel, välilyönti = keskeytä/jatka, Esc = pitkä VASEN. Pikanäppäimet eivät toimi syöttökenttää muokattaessa.");
     gap();ImGui::TextWrapped("Tab ottaa käyttöön säätimien näppäimistökohdistuksen ja varaa nuolet siihen. Hiiren napsautus palauttaa ASkompun pikanäppäimet. Pienessä ikkunassa paneeleita voi vierittää.");
     gap();ImGui::TextWrapped("Tapahtumalokin aika kertoo, milloin käyttöliittymä havaitsi tapahtuman. ASkompun oman tapahtuma-ajan näet viemällä osoittimen tapahtuman päälle. Asetukset ja ajomääräys säilyvät vain tämän ajon muistissa.");
+    gap();
+    const bool showAbout=ImGui::TreeNode("Tietoja simulaattorista");
+    remember("Tietoja simulaattorista");
+    if(showAbout) {
+      ImGui::Text("Versio: %s · %s",build::version,build::configuration());
+      ImGui::TextWrapped("Lähderevisio: %s",build::revision);
+      ImGui::TextWrapped("Työpuu: %s",build::worktree);
+      ImGui::TextWrapped("Yhteinen upstream-pohja: %s",build::upstreamBase);
+      ImGui::TextWrapped("ASkompu-lähteiden tiiviste: %.16s",build::coreFingerprint);
+      ImGui::TextWrapped("Simulaattorin tiiviste: %.16s",build::simulatorFingerprint);
+      ImGui::TreePop();
+    }
     gap();if(button("Sulje",{140*u,40*u},true))ImGui::CloseCurrentPopup();
     ImGui::EndPopup();
   }

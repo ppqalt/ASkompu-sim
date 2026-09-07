@@ -113,8 +113,24 @@ void formatting() {
   ui::formatTrip(text,sizeof(text),10000000); CHECK(std::string(text)=="10.00");
   ui::formatTrip(text,sizeof(text),-1000); CHECK(std::string(text)=="-0.001");
   ui::formatTrip(text,sizeof(text),std::numeric_limits<int64_t>::min());
-  CHECK(text[0]=='-');
+  CHECK(std::string(text)=="-9223372036854.77");
   ui::formatDelta(text,sizeof(text),1); CHECK(std::string(text)=="+1");
+}
+void productionReadBoundary() {
+  simulator::InitialState initial;
+  initial.millimetersPerPulse=997;
+  AppController c(initial);
+  CHECK(c.millimetersPerPulse()==997);
+  acceptTime(c);c.setSpeed(36);c.step();c.press(ButtonId::At);
+  CHECK(c.displayModel().trip1.distanceMillimeters==c.engine().application().trip1DistanceMillimeters());
+  CHECK(c.applicationEventCount()==c.engine().application().eventRepository().count());
+  CHECK(c.applicationEvent(0)==c.engine().application().eventRepository().at(0));
+  bool found=false;
+  for(const auto& row:c.diagnostics())
+    if(row.first=="Pulssimäärä") {found=true;CHECK(row.second==std::to_string(c.engine().generatedPulseCount()));}
+  CHECK(found);
+  c.requestReset();c.confirmReset();
+  CHECK(c.applicationEventCount()==0&&c.applicationEvent(0)==nullptr&&c.millimetersPerPulse()==997);
 }
 void invalidInput() {
   AppController c;
@@ -133,7 +149,7 @@ int main() {
     {"Pitkän ruutuviiveen rajaaminen",stalledFrame},{"Askel on aina 0,1 s",exactStep},
     {"Nopeus, peruutus ja pysähdys",driving},{"Painikkeet ja pidetty nollaus",buttonsAndHold},
     {"Vahvistettu aloitus alusta",resetConfirmation},{"Rajattu loki ja aidot tapahtumat",boundedLog},
-    {"Tuotannon yhteinen lukumuotoilu",formatting},{"Virheelliset ohjaussyötteet",invalidInput}};
+    {"Tuotannon yhteinen lukumuotoilu",formatting},{"Virheelliset ohjaussyötteet",invalidInput},{"Tuotantotilan lukuraja",productionReadBoundary}};
   unsigned failures=0;
   for(const auto& test:tests) {
     try {test.second(); std::cout<<"Hyväksytty: "<<test.first<<'\n';}

@@ -11,6 +11,7 @@
 #include <stdexcept>
 #include <string>
 #include "EmbeddedFont.h"
+#include "BuildInformation.h"
 #include "AppController.h"
 #include "GuiSmokeCheck.h"
 #include "SimulatorView.h"
@@ -34,8 +35,18 @@ int main(int argc,char** argv) {
   bool check=false;
   std::string screenshotDirectory;
   for(int i=1;i<argc;++i) {
+    if(std::strcmp(argv[i],"--versio")==0) {
+      namespace build=simulator::desktop::build;
+      std::cout<<"ASkompu-simulaattori "<<build::version<<'\n'
+        <<"Lähderevisio: "<<build::revision<<'\n'<<"Työpuu: "<<build::worktree<<'\n'
+        <<"Yhteinen upstream-pohja: "<<build::upstreamBase<<'\n'
+        <<"ASkompu-lähteiden SHA-256: "<<build::coreFingerprint<<'\n'
+        <<"Simulaattorilähteiden SHA-256: "<<build::simulatorFingerprint<<'\n';
+      return 0;
+    }
     if(std::strcmp(argv[i],"--ohje")==0) {
       std::cout<<"ASkompu-simulaattori\nKäynnistys: askompu-simulaattori\n"
+        "  --versio               Näytä version ja lähteiden tunnisteet\n"
         "  --ohje                 Näytä tämä ohje\n"
         "  --tarkista             Suorita näkyvä käyttöliittymän käynnistystesti ja sulje\n"
         "  --tarkistuskuvat POLKU  Tallenna käynnistystestin tarkistuskuvat olemassa olevaan hakemistoon\n";
@@ -68,8 +79,8 @@ int main(int argc,char** argv) {
     // Tab ottaa UI-kohdistuksen käyttöön. Muulloin nuolet kuuluvat ASkompulle.
     ImFontConfig font; font.FontDataOwnedByAtlas=false;
     static const ImWchar glyphs[]={0x20,0xFF,0x2010,0x203A,0x2190,0x2193,0x2212,0x2212,0};
-    io.FontDefault=io.Fonts->AddFontFromMemoryTTF(const_cast<unsigned char*>(embeddedFont),sizeof(embeddedFont),17*scale,&font,glyphs);
-    ImFont* displayFont=io.Fonts->AddFontFromMemoryTTF(const_cast<unsigned char*>(embeddedFont),sizeof(embeddedFont),144*scale,&font,glyphs);
+    io.FontDefault=io.Fonts->AddFontFromMemoryTTF(const_cast<unsigned char*>(embeddedFont),static_cast<int>(sizeof(embeddedFont)),17*scale,&font,glyphs);
+    ImFont* displayFont=io.Fonts->AddFontFromMemoryTTF(const_cast<unsigned char*>(embeddedFont),static_cast<int>(sizeof(embeddedFont)),144*scale,&font,glyphs);
     if(!io.FontDefault||!displayFont)throw std::runtime_error("Simulaattorin fonttia ei voitu ladata");
     simulator::desktop::applyDesktopStyle(scale);
     if(!ImGui_ImplSDL2_InitForSDLRenderer(desktop.window,desktop.renderer))

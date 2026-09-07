@@ -1,0 +1,12 @@
+ASkompu-simulaattori @ASKOMPU_VERSION@
+Rakennusmääritys: @ASKOMPU_CONFIGURATION@
+Lähderevisio: @ASKOMPU_REVISION@
+Työpuu: @ASKOMPU_WORKTREE@
+Yhteinen upstream-pohja: @ASKOMPU_UPSTREAM_BASE@
+ASkompu-lähteiden SHA-256: @ASKOMPU_CORE_FINGERPRINT@
+Simulaattorilähteiden SHA-256: @ASKOMPU_SIMULATOR_FINGERPRINT@
+
+Yhteinen upstream-pohja on HEADin ja paikallisen upstream/main-viitteen
+merge-base, ei lupaus uusimmasta upstreamista. Lähdetiivisteet tunnistavat
+myös paikalliset muutokset. Git ei ole ajonaikainen riippuvuus.
+SDL 2.32.10; Dear ImGui 1.91.9b (oletusarvoinen lähteistä rakennettu paketti).

@@ -1,0 +1,80 @@
+name: Simulaattorin laatuportti
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: simulator-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  desktop:
+    name: ${{ matrix.preset }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            preset: linux-release
+          - os: ubuntu-latest
+            preset: linux-clang
+          - os: windows-latest
+            preset: windows-release
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: simulator
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Linuxin näyttöriippuvuudet
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxext-dev libxcursor-dev libxi-dev libxrandr-dev libxss-dev
+      - name: Upstream-pohjan tunnistus (vain fetch)
+        run: git fetch --no-tags https://github.com/Mikky100/ASkompu.git main:refs/remotes/upstream/main
+      - name: Määritä
+        run: cmake --preset ${{ matrix.preset }}
+      - name: Rakenna
+        run: cmake --build --preset ${{ matrix.preset }}
+      - name: Testaa kaikki moottori-, ohjain- ja host-testit
+        run: ctest --preset ${{ matrix.preset }}
+      - name: Linuxin GUI-tarkistus ilman työpöytää
+        if: matrix.preset == 'linux-release'
+        env:
+          SDL_VIDEODRIVER: dummy
+        run: ./build/linux-release/askompu-simulaattori --tarkista
+      - name: Tarkistustyökalun eristystestit
+        if: matrix.preset == 'linux-release'
+        run: python3 -m unittest discover -s tests -p 'test_upstream_check.py' -v
+      - name: Windowsin siirrettävä ZIP
+        if: runner.os == 'Windows'
+        run: cpack --preset windows-release
+      - name: Windows-paketin rakenne, DLL-auditin jälkeinen ajo ja UTF-8-polku
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./tools/verify_windows_package.ps1 -Archive ./build/windows-release/packages/ASkompu-simulaattori-windows-x64.zip
+      - name: Tallenna Windows-paketti tarkistettavaksi
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ASkompu-simulaattori-windows-x64
+          path: simulator/build/windows-release/packages/ASkompu-simulaattori-windows-x64.zip
+          if-no-files-found: error
+          retention-days: 14
+  firmware:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install platformio==6.1.18
+      - run: pio run -e lilygo-main
+      - run: pio run -e esp32s3-ili9488-main

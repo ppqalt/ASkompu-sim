@@ -19,7 +19,7 @@ class GuiSmokeCheck {
     std::function<void(AppController&)> verify;
     ImGuiKey key = ImGuiKey_None;
     bool control = false;
-    std::string text;
+    std::string text{};
   };
   std::vector<Action> actions_;
   std::string outputDirectory_;

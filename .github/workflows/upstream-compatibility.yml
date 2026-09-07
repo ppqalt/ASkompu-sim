@@ -1,0 +1,18 @@
+name: Upstream-yhteensopivuus (tilapäinen klooni)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  compatibility:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Linuxin näyttöriippuvuudet
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxext-dev libxcursor-dev libxi-dev libxrandr-dev libxss-dev
+      - name: Tilapäinen upstream/main-yhdistäminen, GUI-rakennus ja kaikki host-testit
+        run: python3 simulator/tools/check_upstream.py
