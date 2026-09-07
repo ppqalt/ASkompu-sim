@@ -7,6 +7,8 @@
 #include <chrono>
 #include <cstring>
 #include <iostream>
+#include <filesystem>
+#include <fstream>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -14,6 +16,7 @@
 #include "BuildInformation.h"
 #include "AppController.h"
 #include "GuiSmokeCheck.h"
+#include "CoreVersionSmokeCheck.h"
 #include "SimulatorView.h"
 
 namespace {
@@ -32,13 +35,16 @@ struct Desktop {
 };
 }
 int main(int argc,char** argv) {
-  bool check=false;
+  bool check=false,coreCheck=false,coreBuildCheck=false;
   std::string screenshotDirectory;
+  std::string coreHome,coreUpstream,startupReady;
   for(int i=1;i<argc;++i) {
     if(std::strcmp(argv[i],"--versio")==0) {
       namespace build=simulator::desktop::build;
       std::cout<<"ASkompu-simulaattori "<<build::version<<'\n'
         <<"Lähderevisio: "<<build::revision<<'\n'<<"Työpuu: "<<build::worktree<<'\n'
+        <<"ASkompu-ydin: "<<build::coreRevision<<'\n'<<"Ytimen työpuu: "<<build::coreWorktree<<'\n'
+        <<"Ytimen tagi: "<<build::coreTag<<'\n'<<"Ytimen päiväys: "<<build::coreDate<<'\n'
         <<"Yhteinen upstream-pohja: "<<build::upstreamBase<<'\n'
         <<"ASkompu-lähteiden SHA-256: "<<build::coreFingerprint<<'\n'
         <<"Simulaattorilähteiden SHA-256: "<<build::simulatorFingerprint<<'\n';
@@ -48,14 +54,25 @@ int main(int argc,char** argv) {
       std::cout<<"ASkompu-simulaattori\nKäynnistys: askompu-simulaattori\n"
         "  --versio               Näytä version ja lähteiden tunnisteet\n"
         "  --ohje                 Näytä tämä ohje\n"
+        "  --core-home POLKU       Versionvalitsimen erillinen työtila\n"
+        "  --tarkista-ytimenvalitsin  Tarkista versionvalitsimen GUI\n"
+        "  --testaa-ytimen-rakennus  Lisää oikea rakennus-, peruutus- ja restart-testi\n"
         "  --tarkista             Suorita näkyvä käyttöliittymän käynnistystesti ja sulje\n"
         "  --tarkistuskuvat POLKU  Tallenna käynnistystestin tarkistuskuvat olemassa olevaan hakemistoon\n";
       return 0;
     } else if(std::strcmp(argv[i],"--tarkista")==0)check=true;
+    else if(std::strcmp(argv[i],"--tarkista-ytimenvalitsin")==0)coreCheck=true;
+    else if(std::strcmp(argv[i],"--testaa-ytimen-rakennus")==0)coreBuildCheck=true;
+    else if(std::strcmp(argv[i],"--core-home")==0&&i+1<argc)coreHome=argv[++i];
+    else if(std::strcmp(argv[i],"--core-upstream")==0&&i+1<argc)coreUpstream=argv[++i];
+    else if(std::strcmp(argv[i],"--startup-ready")==0&&i+1<argc)startupReady=argv[++i];
     else if(std::strcmp(argv[i],"--tarkistuskuvat")==0&&i+1<argc)screenshotDirectory=argv[++i];
     else {std::cerr<<"Virhe: tuntematon tai puutteellinen valitsin. Katso --ohje.\n";return 1;}
   }
-  if(!screenshotDirectory.empty()&&!check) {
+  if((check&&coreCheck)||(coreBuildCheck&&!coreCheck)) {
+    std::cerr<<"Virhe: valitse yksi GUI-tarkistus; ytimen rakennustesti tarvitsee --tarkista-ytimenvalitsin-valitsimen.\n";return 1;
+  }
+  if(!screenshotDirectory.empty()&&!check&&!coreCheck) {
     std::cerr<<"Virhe: tarkistuskuvat edellyttävät --tarkista-valitsinta.\n";return 1;
   }
   Desktop desktop;
@@ -89,9 +106,11 @@ int main(int argc,char** argv) {
     if(!ImGui_ImplSDLRenderer2_Init(desktop.renderer))throw std::runtime_error("Käyttöliittymän piirtoa ei voitu alustaa");
     desktop.rendererBackend=true;
     simulator::desktop::AppController controller;
-    simulator::desktop::SimulatorView view(controller,displayFont);
+    simulator::desktop::SimulatorView view(controller,displayFont,coreHome,coreUpstream);
     std::unique_ptr<simulator::desktop::GuiSmokeCheck> smoke;
     if(check)smoke=std::make_unique<simulator::desktop::GuiSmokeCheck>(screenshotDirectory);
+    std::unique_ptr<simulator::desktop::CoreVersionSmokeCheck> coreSmoke;
+    if(coreCheck)coreSmoke=std::make_unique<simulator::desktop::CoreVersionSmokeCheck>(screenshotDirectory,coreBuildCheck);
     auto previous=std::chrono::steady_clock::now();
     bool done=false;
     while(!done) {
@@ -111,12 +130,22 @@ int main(int argc,char** argv) {
       controller.hostFrame(check?16666666:static_cast<uint64_t>(std::max<int64_t>(elapsed,0)));
       ImGui_ImplSDLRenderer2_NewFrame();ImGui_ImplSDL2_NewFrame();
       if(smoke)smoke->beforeFrame(view,controller,desktop.window);
+      if(coreSmoke)coreSmoke->beforeFrame(view,desktop.window);
       ImGui::NewFrame();view.render();ImGui::Render();
       SDL_RenderSetScale(desktop.renderer,io.DisplayFramebufferScale.x,io.DisplayFramebufferScale.y);
       SDL_SetRenderDrawColor(desktop.renderer,11,16,19,255);SDL_RenderClear(desktop.renderer);
       ImGui_ImplSDLRenderer2_RenderDrawData(ImGui::GetDrawData(),desktop.renderer);
       if(smoke)smoke->afterRender(desktop.renderer);
+      if(coreSmoke)coreSmoke->afterRender(desktop.renderer);
       SDL_RenderPresent(desktop.renderer);
+      if(!startupReady.empty()) {
+        std::ofstream ready(std::filesystem::u8path(startupReady));
+        ready<<"ASkompu-ydin: "<<simulator::desktop::build::coreRevision<<'\n';
+        if(!ready)throw std::runtime_error("Uuden ikkunan käynnistyskuittausta ei voitu kirjoittaa");
+        startupReady.clear();
+      }
+      if(view.restartCompleted()&&!coreSmoke)done=true;
+      if(coreSmoke&&coreSmoke->finished())done=true;
       if(smoke&&smoke->finished())done=true;
       // Vain UI:n joutokäynti: odotus ei koskaan määrää simulaation tuloksia.
       SDL_Delay((SDL_GetWindowFlags(desktop.window)&SDL_WINDOW_MINIMIZED)?20:1);
@@ -124,7 +153,7 @@ int main(int argc,char** argv) {
     return 0;
   } catch(const std::exception& error) {
     std::cerr<<"Virhe: "<<error.what()<<'\n';
-    if(!check)SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR,"ASkompu-simulaattori · Virhe",error.what(),desktop.window);
+    if(!check&&!coreCheck)SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR,"ASkompu-simulaattori · Virhe",error.what(),desktop.window);
     return 1;
   }
 }

@@ -278,6 +278,7 @@ void SimulatorView::dialogs() {
     if(showAbout) {
       ImGui::Text("Versio: %s · %s",build::version,build::configuration());
       ImGui::TextWrapped("Lähderevisio: %s",build::revision);
+      ImGui::TextWrapped("ASkompu-ydin: %s",build::coreRevision);
       ImGui::TextWrapped("Työpuu: %s",build::worktree);
       ImGui::TextWrapped("Yhteinen upstream-pohja: %s",build::upstreamBase);
       ImGui::TextWrapped("ASkompu-lähteiden tiiviste: %.16s",build::coreFingerprint);
@@ -291,12 +292,23 @@ void SimulatorView::dialogs() {
 
 void SimulatorView::render() {
   hitRegions_.clear();
+  coreVersions_.poll();
   ImGui::SetNextWindowPos({0,0});ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
   ImGui::Begin("ASkompu-simulaattori",nullptr,ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoSavedSettings);
   const float u=unit();
   ImGui::TextColored(accent,"ASkompu");ImGui::SameLine();label("/  SIMULAATTORI");
-  ImGui::SameLine(ImGui::GetWindowContentRegionMax().x-92*u);
-  if(button("Ohje",{82*u,32*u}))helpOpen_=true;
+  if(ImGui::GetContentRegionAvail().x>=640*u)ImGui::SameLine(250*u);else gap(4);
+  if(button("Simulaattori",{140*u,36*u},!corePage_))corePage_=false;
+  ImGui::SameLine();
+  if(button("Ytimen versio",{150*u,36*u},corePage_)){corePage_=true;controller_.pause();}
+  ImGui::SameLine(ImGui::GetWindowContentRegionMax().x-82*u);
+  if(button("Ohje",{82*u,36*u}))helpOpen_=true;
+  if(corePage_) {
+    gap(12);coreVersions_.render();
+    for(const auto& hit:coreVersions_.hitRegions())hitRegions_[hit.first]={hit.second.first,hit.second.second};
+    dialogs();ImGui::End();return;
+  }
+  gap(6);
   ImGui::TextColored(controller_.paused()?amber:accent,"%s",controller_.paused()?"KESKEYTETTY":"KÄYNNISSÄ");
   ImGui::SameLine();label("·");ImGui::SameLine();
   ImGui::TextUnformatted(durationText(controller_.engine().monotonicMicroseconds()).c_str());

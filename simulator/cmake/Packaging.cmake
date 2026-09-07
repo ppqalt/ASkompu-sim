@@ -29,7 +29,10 @@ else()
 endif()
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/generated/BUILDINFO-$<CONFIG>.txt"
   DESTINATION "${data_destination}" RENAME BUILDINFO.txt COMPONENT Runtime)
-install(FILES "${ASKOMPU_ROOT}/LICENSE" DESTINATION "${license_destination}" RENAME ASkompu-LICENSE.txt COMPONENT Runtime)
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/simulator-source.zip"
+  DESTINATION "${data_destination}" COMPONENT Runtime)
+install(FILES tools/core_versions.py DESTINATION "${data_destination}/tools" COMPONENT Runtime)
+install(FILES "${ASKOMPU_CORE_ROOT}/LICENSE" DESTINATION "${license_destination}" RENAME ASkompu-LICENSE.txt COMPONENT Runtime)
 install(FILES "${imgui_SOURCE_DIR}/LICENSE.txt" DESTINATION "${license_destination}" RENAME ImGui-LICENSE.txt COMPONENT Runtime)
 install(FILES assets/Roboto-LICENSE.txt THIRD_PARTY.md DESTINATION "${license_destination}" COMPONENT Runtime)
 if(NOT ASKOMPU_USE_SYSTEM_SDL)

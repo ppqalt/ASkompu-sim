@@ -8,7 +8,7 @@
 #include <vector>
 #include "ui/AppController.h"
 #include "ui/Finnish.h"
-#include "ui/DisplayFormatting.h"
+#include "DisplayFormatting.h"
 
 using simulator::desktop::AppController;
 using core::ButtonId;

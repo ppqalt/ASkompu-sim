@@ -2,6 +2,10 @@ ASkompu-simulaattori @ASKOMPU_VERSION@
 Rakennusmääritys: @ASKOMPU_CONFIGURATION@
 Lähderevisio: @ASKOMPU_REVISION@
 Työpuu: @ASKOMPU_WORKTREE@
+ASkompu-ydin: @ASKOMPU_ACTUAL_CORE_REVISION@
+Ytimen päiväys: @ASKOMPU_CORE_DATE@
+Ytimen tagi: @ASKOMPU_CORE_TAG@
+Ytimen työpuu: @ASKOMPU_CORE_WORKTREE@
 Yhteinen upstream-pohja: @ASKOMPU_UPSTREAM_BASE@
 ASkompu-lähteiden SHA-256: @ASKOMPU_CORE_FINGERPRINT@
 Simulaattorilähteiden SHA-256: @ASKOMPU_SIMULATOR_FINGERPRINT@

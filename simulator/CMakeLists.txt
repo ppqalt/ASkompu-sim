@@ -4,7 +4,7 @@ option(ASKOMPU_STATIC_MSVC_RUNTIME "Linkitä MSVC-ajonaikaiskirjasto staattisest
 if(ASKOMPU_STATIC_MSVC_RUNTIME)
   set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()
-project(ASkompuSimulator VERSION 0.2.5 LANGUAGES C CXX)
+project(ASkompuSimulator VERSION 0.3.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -13,23 +13,28 @@ if(MSVC)
   add_compile_options(/utf-8)
 endif()
 
-set(ASKOMPU_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/..")
+get_filename_component(ASKOMPU_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
+set(ASKOMPU_CORE_ROOT "${ASKOMPU_ROOT}" CACHE PATH "Valitun ASkompu-ytimen lähdehakemisto")
+set(ASKOMPU_CORE_REVISION "" CACHE STRING "Erillisen ytimen lukittu täysi Git-SHA")
+file(REAL_PATH "${ASKOMPU_CORE_ROOT}" ASKOMPU_CORE_ROOT)
+include(cmake/ValidateCore.cmake)
+askompu_validate_core()
 add_library(askompu_core STATIC
-  ${ASKOMPU_ROOT}/src/core/ApplicationCore.cpp
-  ${ASKOMPU_ROOT}/src/core/Clock.cpp
-  ${ASKOMPU_ROOT}/src/domain/CalibrationSetting.cpp
-  ${ASKOMPU_ROOT}/src/domain/CompetitionEngine.cpp
-  ${ASKOMPU_ROOT}/src/domain/CompetitionRecords.cpp
-  ${ASKOMPU_ROOT}/src/domain/EventRepository.cpp
-  ${ASKOMPU_ROOT}/src/domain/MotionMath.cpp
-  ${ASKOMPU_ROOT}/src/domain/RouteOrder.cpp
-  ${ASKOMPU_ROOT}/src/domain/SpeedCalculator.cpp
-  ${ASKOMPU_ROOT}/src/domain/TripCounter.cpp
-  ${ASKOMPU_ROOT}/src/route/RouteOrderCodec.cpp
-  ${ASKOMPU_ROOT}/src/route/RouteOrderEditor.cpp
+  ${ASKOMPU_CORE_ROOT}/src/core/ApplicationCore.cpp
+  ${ASKOMPU_CORE_ROOT}/src/core/Clock.cpp
+  ${ASKOMPU_CORE_ROOT}/src/domain/CalibrationSetting.cpp
+  ${ASKOMPU_CORE_ROOT}/src/domain/CompetitionEngine.cpp
+  ${ASKOMPU_CORE_ROOT}/src/domain/CompetitionRecords.cpp
+  ${ASKOMPU_CORE_ROOT}/src/domain/EventRepository.cpp
+  ${ASKOMPU_CORE_ROOT}/src/domain/MotionMath.cpp
+  ${ASKOMPU_CORE_ROOT}/src/domain/RouteOrder.cpp
+  ${ASKOMPU_CORE_ROOT}/src/domain/SpeedCalculator.cpp
+  ${ASKOMPU_CORE_ROOT}/src/domain/TripCounter.cpp
+  ${ASKOMPU_CORE_ROOT}/src/route/RouteOrderCodec.cpp
+  ${ASKOMPU_CORE_ROOT}/src/route/RouteOrderEditor.cpp
 )
 target_include_directories(askompu_core PUBLIC
-  ${ASKOMPU_ROOT}/src ${ASKOMPU_ROOT}/include)
+  ${ASKOMPU_CORE_ROOT}/src ${ASKOMPU_CORE_ROOT}/include)
 
 add_library(askompu_simulator STATIC
   engine/SimulatorEngine.cpp engine/WheelPulseGenerator.cpp)
@@ -44,15 +49,16 @@ endif()
 
 include(CTest)
 add_library(askompu_desktop_controller STATIC ui/AppController.cpp ui/Finnish.cpp
-  ${ASKOMPU_ROOT}/src/ui/RouteOrderFormatting.cpp)
+  ${ASKOMPU_CORE_ROOT}/src/ui/RouteOrderFormatting.cpp)
 target_link_libraries(askompu_desktop_controller PUBLIC askompu_simulator)
+target_include_directories(askompu_desktop_controller PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/compat")
 
 option(ASKOMPU_BUILD_GUI "Rakenna graafinen ASkompu-simulaattori" OFF)
 if(ASKOMPU_BUILD_GUI)
   include(cmake/DesktopDependencies.cmake)
   add_executable(askompu-simulaattori
-    ui/Main.cpp ui/SimulatorView.cpp ui/DeviceDisplay.cpp ui/GuiSmokeCheck.cpp
-    ${ASKOMPU_ROOT}/src/ui/DisplayLayout.cpp)
+    ui/Main.cpp ui/SimulatorView.cpp ui/CoreVersionView.cpp ui/CoreVersionSmokeCheck.cpp ui/DeviceDisplay.cpp ui/GuiSmokeCheck.cpp
+    ${ASKOMPU_CORE_ROOT}/src/ui/DisplayLayout.cpp)
   target_include_directories(askompu-simulaattori PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
   if(WIN32)
     if(NOT TARGET SDL2::SDL2main)
@@ -97,12 +103,12 @@ if(BUILD_TESTING)
     target_include_directories(askompu_unity PUBLIC "${ASKOMPU_UNITY_SOURCE_DIR}")
     target_compile_definitions(askompu_unity PUBLIC UNITY_SUPPORT_64)
     add_library(askompu_host_adapters STATIC
-      ${ASKOMPU_ROOT}/src/input/ButtonInterpreter.cpp
-      ${ASKOMPU_ROOT}/src/ui/DisplayLayout.cpp
-      ${ASKOMPU_ROOT}/src/ui/RouteOrderFormatting.cpp)
+      ${ASKOMPU_CORE_ROOT}/src/input/ButtonInterpreter.cpp
+      ${ASKOMPU_CORE_ROOT}/src/ui/DisplayLayout.cpp
+      ${ASKOMPU_CORE_ROOT}/src/ui/RouteOrderFormatting.cpp)
     target_link_libraries(askompu_host_adapters PUBLIC askompu_core)
     foreach(suite motion_math competition competition_records display_layout board_profiles)
-      add_executable(existing_${suite} "${ASKOMPU_ROOT}/test/test_${suite}/test_main.cpp")
+      add_executable(existing_${suite} "${ASKOMPU_CORE_ROOT}/test/test_${suite}/test_main.cpp")
       target_compile_definitions(existing_${suite} PRIVATE ASKOMPU_BOARD_LILYGO_MAIN=1)
       target_link_libraries(existing_${suite} PRIVATE askompu_host_adapters askompu_unity)
       add_test(NAME nykyinen_${suite} COMMAND existing_${suite})

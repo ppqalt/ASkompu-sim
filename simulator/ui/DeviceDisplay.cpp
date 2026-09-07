@@ -5,7 +5,7 @@
 #include <cstdio>
 #include <string>
 #include "Finnish.h"
-#include "ui/DisplayFormatting.h"
+#include "DisplayFormatting.h"
 #include "ui/DisplayLayout.h"
 #include "ui/RouteOrderFormatting.h"
 

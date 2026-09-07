@@ -1,11 +1,23 @@
-# ASkompu-simulaattori – vaihe 2.5
+# ASkompu-simulaattori 0.3.0
 
 Natiivi, suomenkielinen työpöytäsimulaattori oikean ASkompu-tuotantoytimen
 ympärillä. SDL2 ja Dear ImGui piirtävät käyttöliittymän; vaiheen 1
 deterministinen `SimulatorEngine` tuottaa ajan, pulssit ja painikesyötteet.
 Moottoria voi edelleen käyttää ja testata ilman graafisia riippuvuuksia.
 
-## Vaiheen 2.5 kehittäjän pikapolku
+## ASkompu Core / Ytimen versio (0.3.0)
+
+Yläpalkin **Ytimen versio** hakee Mikky100/ASkompun mainin, tagit ja commitit,
+rakentaa valitun täyden SHA:n erillisistä tuotantolähteistä ja tarjoaa
+uudelleenkäynnistyksen vasta testien jälkeen. Nykyinen ohjelma ja alkuperäinen
+Git-työpuu säilyvät. Edelliseen ohjelmaan voi palata samasta näkymästä.
+
+Tavallinen simulointi toimii ilman kehitystyökaluja. Ytimen paikallinen
+rakentaminen tarvitsee Pythonin, Gitin ja CMake/CTestin sekä Windowsissa
+Visual Studio 2022 C++ -työkalut ja Windows SDK:n. Puuttuvat vaatimukset
+näkyvät GUI:ssa. [Käyttö, arkkitehtuuri ja testit](docs/CORE_VERSIONS.md).
+
+## Kehittäjän pikapolku
 
 Tarvitaan **CMake 3.25+** ja C/C++17-kääntäjä. Komennot ajetaan
 `simulator`-hakemistossa, ei repositorion juuressa. Linuxilla tarvitaan myös
@@ -61,7 +73,9 @@ hyväksyntä edellyttää Windows/MSVC-rakennuksen, kaikkien testien, DLL-auditi
 ja puretun ZIPin automaattisen ajotarkistuksen onnistumista GitHub Actionsissa.
 Todelliset tarkistustulokset ja lataukset kirjataan
 [oman forkin julkaisusivulle](https://github.com/ppqalt/ASkompu-sim/releases/tag/v0.2.5).
-**Windows 11 -työpöytäajo on edelleen manuaalisesti varmentamatta.**
+**Version 0.3.0 uuden versionvalitsimen Windows-rakennus ja Windows 11
+-työpöytäajo ovat tässä kehitystyössä varmentamatta.** Aiemman 0.2.5-julkaisun
+CI ja käyttäjän ilmoittama toimiva Windows-ajo eivät varmista uutta ominaisuutta.
 Simulaattori on työpöydän kehitys- ja kokeilutyökalu, ei alkuperäisen
 firmwaren tuotantojulkaisu tai turvallisuussertifioitu ajoneuvon navigointilaite.
 
@@ -128,8 +142,8 @@ rivinvaihtojen muutos voi muuttaa tiivistettä.
 `origin` on `ppqalt/ASkompu-sim`, `upstream` on `Mikky100/ASkompu`.
 Suositeltu työnkulku on `fetch` ja tietoisesti tehty merge erillisessä
 päivityshaarassa. [Upstream-ohje](docs/UPSTREAM.md) sisältää tarkat komennot,
-ristiriidan perumisen ja laadun tarkistukset. Ohjelma ei ota verkkoyhteyksiä
-eikä päivitä itseään.
+ristiriidan perumisen ja laadun tarkistukset. Tavallinen simulointi ei ota verkkoyhteyksiä. Versionvalitsin hakee lähteitä
+vain käyttäjän käynnistämissä toiminnoissa eikä vaihda ohjelmaa ilman vahvistusta.
 
 Puhdasta Git-haaraa voi tarkistaa Linuxilla muuttamatta sitä:
 
@@ -523,8 +537,8 @@ myös; reset aloittaa uuden aikajanan.
 - GUI:n loki on rajattu, mutta tuotannon muistissa oleva tapahtumavarasto
   säilyttää ajon tapahtumat edelleen rajoittamatta. Pitkän ajon voi aloittaa
   alusta; varaston säilytyssopimus kuuluu myöhempään vaiheeseen.
-- Ei tiedostojen tuontia/vientiä, tallennettua toistoa, verkkoa, Bluetoothia
-  tai laitekytkentää. Ajomääräys ja asetukset ovat vain ajon muistissa.
+- Ei skenaarioiden tuontia/vientiä, tallennettua toistoa, Bluetoothia
+  tai laitekytkentää. Versionvalitsin käyttää verkkoa lähdekoodin hakemiseen. Ajomääräys ja asetukset ovat vain ajon muistissa.
 - Windows 11:n manuaalinen työpöytäajo, usean näytön vaihtuva DPI ja
   ruudunlukijan käyttö on vielä varmennettava erikseen.
 - Vaiheessa 3 kannattaa määrittää versioitu skenaario-/toistotiedosto ja

@@ -1,7 +1,7 @@
 #include "Finnish.h"
 
 #include <cstdio>
-#include "ui/DisplayFormatting.h"
+#include "DisplayFormatting.h"
 
 namespace simulator::desktop {
 const char* buttonName(core::ButtonId id) {

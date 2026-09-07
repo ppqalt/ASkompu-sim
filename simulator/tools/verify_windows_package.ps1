@@ -8,7 +8,7 @@ try {
     Expand-Archive -LiteralPath $archivePath -DestinationPath $root
     $app = Join-Path $root 'ASkompu-simulaattori'
     $exe = Join-Path $app 'askompu-simulaattori.exe'
-    $expected = @('askompu-simulaattori.exe', 'README.txt', 'BUILDINFO.txt',
+    $expected = @('askompu-simulaattori.exe', 'README.txt', 'BUILDINFO.txt', 'simulator-source.zip', 'tools/core_versions.py',
         'LISENSSIT/ASkompu-LICENSE.txt', 'LISENSSIT/SDL-LICENSE.txt',
         'LISENSSIT/ImGui-LICENSE.txt', 'LISENSSIT/Roboto-LICENSE.txt', 'LISENSSIT/THIRD_PARTY.md')
     $actual = @(Get-ChildItem -LiteralPath $root -Recurse -File | ForEach-Object {

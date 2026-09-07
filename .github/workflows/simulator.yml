@@ -50,6 +50,16 @@ jobs:
       - name: Tarkistustyökalun eristystestit
         if: matrix.preset == 'linux-release'
         run: python3 -m unittest discover -s tests -p 'test_upstream_check.py' -v
+      - name: Ytimen versionvalitsimen Git-, prosessi- ja SHA-testit
+        run: python -m unittest discover -s tests -p 'test_core_versions.py' -v
+      - name: Versionvalitsimen GUI-tarkistus paikallisella Git-lähteellä
+        if: matrix.preset == 'linux-release'
+        env:
+          SDL_VIDEODRIVER: dummy
+        run: |
+          git clone --bare .. "$RUNNER_TEMP/core-upstream.git"
+          git -C "$RUNNER_TEMP/core-upstream.git" update-ref refs/heads/main "$(git rev-parse HEAD)"
+          ./build/linux-release/askompu-simulaattori --tarkista-ytimenvalitsin --core-home "$RUNNER_TEMP/core-selector" --core-upstream "$RUNNER_TEMP/core-upstream.git"
       - name: Linux-paketti ja puretun paketin ajotarkistus
         if: matrix.preset == 'linux-release'
         env:
@@ -68,6 +78,7 @@ jobs:
           "$app/bin/askompu-simulaattori" --versio
           "$app/bin/askompu-simulaattori" --tarkista --tarkistuskuvat "$package_root/Kuvat ää"
           test "$(find "$package_root/Kuvat ää" -name '*.bmp' | wc -l)" -eq 3
+          "$app/bin/askompu-simulaattori" --tarkista-ytimenvalitsin --core-home "$package_root/Ytimen työtila" --core-upstream "$RUNNER_TEMP/core-upstream.git"
       - name: Tallenna Linux-paketti tarkistettavaksi
         if: matrix.preset == 'linux-release'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

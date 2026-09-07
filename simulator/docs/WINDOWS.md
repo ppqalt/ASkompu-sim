@@ -2,6 +2,11 @@
 
 ## Varmennustaso
 
+Simulaattorin nykyinen kehitysversio on **0.3.0**. Uuden GitHub-versionvalitsimen
+Windows-rakennusta, prosessien peruutusta, työkalutunnistusta, restartia ja
+rollbackia ei ole vielä tässä työssä suoritettu Windowsilla. Alla kuvattu
+0.2.5-julkaisun varmennus on aiemman version tausta, ei 0.3.0:n testitulos.
+
 v0.2.5 on simulaattorin ensimmäinen esikatselujulkaisu. Windows-paketti
 hyväksytään vasta, kun GitHub Actionsin Windows Server 2022 / Visual Studio
 2022 -työ rakentaa MSVC x64 -ohjelman, suorittaa kaikki C++-testit, tarkistaa
@@ -55,6 +60,8 @@ ASkompu-simulaattori/
 ├── askompu-simulaattori.exe
 ├── README.txt
 ├── BUILDINFO.txt
+├── simulator-source.zip
+├── tools/core_versions.py
 └── LISENSSIT/
     ├── ASkompu-LICENSE.txt
     ├── SDL-LICENSE.txt
@@ -65,7 +72,8 @@ ASkompu-simulaattori/
 
 Ohjelma ei tarvitse lähderepoa, työhakemistoon asennettua aineistoa tai
 ajonaikaista Gitiä. Fontti on EXE:n sisällä. Pakettiin ei asenneta testejä,
-CMake-välimuistia, objektitiedostoja, kehitys-DLL:iä tai lähdekoodia.
+CMake-välimuistia, objektitiedostoja, kehitys-DLL:iä. Erillinen simulator-source.zip on versionvalitsimen
+rakennuslähde; sen käyttö on valinnaista ja vaatii kehitystyökalut.
 Vastaanottajalle toimitetaan ZIP ja sen sisällä oleva lyhyt README;
 kehittäjän työkaluja ei tarvita julkaistun sovelluksen ajamiseen.
 
@@ -139,3 +147,10 @@ varoituksen puuttumista ei luvata. Älä neuvo poistamaan suojausta käytöstä.
 Lyhyt loppukäyttäjän teksti on erillään: `release/README-windows.txt`.
 [Microsoftin SmartScreen-kuvaus](https://learn.microsoft.com/en-us/windows/security/operating-system-security/virus-and-threat-protection/microsoft-defender-smartscreen/)
 selittää varoitusten taustalla olevat maine- ja luottamustarkistukset.
+
+## Ytimen versionvalitsin
+
+[Versionvalitsimen ohje](CORE_VERSIONS.md) kuvaa työkalutunnistuksen, erillisen
+rakennuksen ja turvallisen restartin. Tavallinen simulointi ei tarvitse
+Pythonia tai kääntäjää. Uuden ominaisuuden Windows-varmennus kirjataan
+erikseen; aiemman 0.2.5-paketin testit eivät varmista uutta prosessipolkua.
