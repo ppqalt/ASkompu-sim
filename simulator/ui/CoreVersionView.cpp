@@ -158,7 +158,9 @@ void CoreVersionView::start(const std::string& operation,const std::vector<std::
   if(!upstream_.empty()){command.push_back("--upstream");command.push_back(upstream_);}
   command.insert(command.end(),extra.begin(),extra.end());
 #ifdef _WIN32
-  for(const std::vector<std::string>& prefix:std::vector<std::vector<std::string>>{{"py","-3"},{"python"},{"python3"}}){
+  // Prefer the interpreter on PATH: some installations alias py to python.exe,
+  // which does not understand the classic launcher's -3 switch.
+  for(const std::vector<std::string>& prefix:std::vector<std::vector<std::string>>{{"python"},{"python3"},{"py","-3"}}){
     auto invocation=prefix;invocation.insert(invocation.end(),command.begin(),command.end());
     if(spawn(invocation)){running_=true;break;}
   }
