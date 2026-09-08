@@ -4,7 +4,7 @@ option(ASKOMPU_STATIC_MSVC_RUNTIME "Linkitä MSVC-ajonaikaiskirjasto staattisest
 if(ASKOMPU_STATIC_MSVC_RUNTIME)
   set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()
-project(ASkompuSimulator VERSION 0.3.0 LANGUAGES C CXX)
+project(ASkompuSimulator VERSION 1.0.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

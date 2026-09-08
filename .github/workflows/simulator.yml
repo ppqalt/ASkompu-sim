@@ -97,7 +97,13 @@ jobs:
       - name: Windows-paketin rakenne, DLL-auditin jälkeinen ajo ja UTF-8-polku
         if: runner.os == 'Windows'
         shell: pwsh
-        run: ./tools/verify_windows_package.ps1 -Archive ./build/windows-release/packages/ASkompu-simulaattori-windows-x64.zip
+        run: |
+          $core = Join-Path $env:RUNNER_TEMP 'core-upstream.git'
+          git clone --bare .. $core
+          if ($LASTEXITCODE -ne 0) { throw 'Git fixture clone failed' }
+          git -C $core update-ref refs/heads/main (git rev-parse HEAD)
+          if ($LASTEXITCODE -ne 0) { throw 'Git fixture main ref failed' }
+          ./tools/verify_windows_package.ps1 -Archive ./build/windows-release/packages/ASkompu-simulaattori-windows-x64.zip -CoreUpstream $core
       - name: Tallenna Windows-paketti tarkistettavaksi
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

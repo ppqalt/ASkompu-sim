@@ -2,19 +2,16 @@
 
 ## Varmennustaso
 
-Simulaattorin nykyinen kehitysversio on **0.3.0**. Uuden GitHub-versionvalitsimen
-Windows-rakennusta, prosessien peruutusta, työkalutunnistusta, restartia ja
-rollbackia ei ole vielä tässä työssä suoritettu Windowsilla. Alla kuvattu
-0.2.5-julkaisun varmennus on aiemman version tausta, ei 0.3.0:n testitulos.
+Simulaattorin versio on **1.0.0**. Julkaisun laatuporttiin kuuluvat MSVC x64
+-rakennus, C++- ja Python-testit, DLL-auditin hyväksyntä- ja hylkäystestit
+sekä puretun ZIP-paketin GUI- ja versionvalitsimen peruspolun tarkistus
+Windows Server 2022:ssa SDL:n dummy-ajurilla.
+Toteutuneet tulokset kirjataan [1.0.0-julkaisusivulle](https://github.com/ppqalt/ASkompu-sim/releases/tag/v1.0.0).
 
-v0.2.5 on simulaattorin ensimmäinen esikatselujulkaisu. Windows-paketti
-hyväksytään vasta, kun GitHub Actionsin Windows Server 2022 / Visual Studio
-2022 -työ rakentaa MSVC x64 -ohjelman, suorittaa kaikki C++-testit, tarkistaa
-DLL-riippuvuudet ja ajaa puretun ZIPin SDL-tarkistuksen onnistuneesti.
-Julkaistavan commitin tarkistustulokset ja lataukset kirjataan
-[oman forkin julkaisusivulle](https://github.com/ppqalt/ASkompu-sim/releases/tag/v0.2.5).
-**Windows 11 -ajo on manuaalisesti varmentamatta.** CI:n Windows Server
--ajo ei korvaa Windows 11 -työpöytätestiä.
+**Windows 11 -työpöytäajo ja uuden versionvalitsimen koko MSVC-ydinrakennus /
+restart / rollback -ketju ovat manuaalisesti varmentamatta.**
+Aiemman 0.2.5-version henkilökohtaisella Windows-kannettavalla tehty ajo ei
+varmista uuden versionvalitsimen toimintaa.
 
 ## Kehittäjän komennot
 

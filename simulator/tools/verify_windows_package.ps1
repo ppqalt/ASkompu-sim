@@ -1,4 +1,4 @@
-param([Parameter(Mandatory = $true)][string]$Archive)
+param([Parameter(Mandatory = $true)][string]$Archive, [string]$CoreUpstream)
 $ErrorActionPreference = 'Stop'
 $archivePath = (Resolve-Path $Archive).Path
 $previousVideoDriver = $env:SDL_VIDEODRIVER
@@ -19,12 +19,18 @@ try {
     New-Item -ItemType Directory -Path $working | Out-Null
     $captures = Join-Path $root 'Tarkistuskuvat ää'
     New-Item -ItemType Directory -Path $captures | Out-Null
-    foreach ($mode in @('--versio', '--tarkista')) {
+    $modes = @('--versio', '--tarkista')
+    if ($CoreUpstream) { $modes += '--tarkista-ytimenvalitsin' }
+    foreach ($mode in $modes) {
         $stdout = Join-Path $root 'tulos.txt'
         $stderr = Join-Path $root 'virhe.txt'
         $env:SDL_VIDEODRIVER = 'dummy'
         $arguments = @($mode)
         if ($mode -eq '--tarkista') { $arguments += @('--tarkistuskuvat', ('"' + $captures + '"')) }
+        if ($mode -eq '--tarkista-ytimenvalitsin') {
+            $arguments += @('--core-home', ('"' + (Join-Path $root 'Ytimen työtila') + '"'),
+                '--core-upstream', ('"' + $CoreUpstream + '"'))
+        }
         $process = Start-Process -FilePath $exe -WorkingDirectory $working -ArgumentList $arguments `
             -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
         if (-not $process.WaitForExit(120000)) {
@@ -34,8 +40,9 @@ try {
         $process.WaitForExit()
         if ($process.ExitCode -ne 0) { throw "Paketin ajotarkistus epäonnistui: $(Get-Content $stderr -Raw)" }
         $result = Get-Content $stdout -Raw -Encoding utf8
-        if ($mode -eq '--versio' -and $result -notmatch 'ASkompu-simulaattori 0\.') { throw 'Versiotuloste puuttuu.' }
+        if ($mode -eq '--versio' -and $result -notmatch 'ASkompu-simulaattori 1\.0\.0') { throw 'Versiotuloste puuttuu.' }
         if ($mode -eq '--tarkista' -and $result -notmatch 'pienen ikkunan vieritys') { throw 'GUI-tarkistus ei valmistunut.' }
+        if ($mode -eq '--tarkista-ytimenvalitsin' -and $result -notmatch 'pieni ikkuna ja virhetila') { throw 'Versionvalitsimen GUI-tarkistus ei valmistunut.' }
         Write-Output $result
     }
     if (@(Get-ChildItem -LiteralPath $captures -Filter '*.bmp').Count -ne 3) { throw 'UTF-8-polkuun tallennetut tarkistuskuvat puuttuvat.' }

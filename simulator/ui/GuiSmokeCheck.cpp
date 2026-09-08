@@ -104,7 +104,7 @@ void GuiSmokeCheck::beforeFrame(SimulatorView& view,AppController& c,SDL_Window*
   else if(phase_==2) {
     actions_[action_].verify(c);
     std::cout<<"Hyväksytty ohjain: "<<actions_[action_].button<<'\n';
-    if(action_>0&&action.button=="AT"&&actions_[action_-1].button=="AT")snapshot_=1;
+    if(action_>0&&action.button=="AT"&&actions_[action_-1].button=="AT"){snapshot_=1;ImGui::GetIO().AddMousePosEvent(5,5);}
     if(action.button=="Tietoja simulaattorista"&&actions_[action_-1].button=="Ohje")snapshot_=3;
     ++action_;phase_=0;
   }

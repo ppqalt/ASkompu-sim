@@ -256,10 +256,10 @@ void CoreVersionView::requirementsCard(){
 }
 float CoreVersionView::versionList(){
   caption("VALITSE LÄHDEVERSIO");gap(5);
+  const float listTop=ImGui::GetCursorScreenPos().y;
   const char* categories[]={"Kaikki","Main","Tagit","Commitit"};
   ImGui::SetNextItemWidth(130*u());ImGui::Combo("##Rajaus",&category_,categories,4);ImGui::SameLine();
   ImGui::SetNextItemWidth(-1);ImGui::InputTextWithHint("##Haku","Suodata viestiä, tagia tai SHA:ta",filter_,sizeof(filter_));
-  const float listTop=ImGui::GetCursorScreenPos().y;
   ImGui::BeginChild("Versiolista",{0,versions_.empty()?150*u():std::clamp(ImGui::GetIO().DisplaySize.y*.32f,190*u(),360*u())},ImGuiChildFlags_Borders|ImGuiChildFlags_AlwaysUseWindowPadding);
   size_t count=0;
   for(size_t i=0;i<versions_.size();++i){
