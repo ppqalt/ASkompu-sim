@@ -31,7 +31,7 @@ class CoreVersionView {
   void activeCard();
   void selectionCard();
   void progressCard();
-  void versionList();
+  float versionList();
   void requirementsCard();
   std::filesystem::path home_,script_,bundle_,executable_,job_;
   std::string upstream_,operation_,phase_="idle",message_,error_,log_,readyArtifact_,readyLabel_,previous_;
@@ -46,6 +46,7 @@ class CoreVersionView {
   bool scrollTop_ = false;
   bool initialized_ = false, running_ = false, requirementsOk_ = false, closeRequested_ = false;
   bool restartPending_ = false, rollbackPending_ = false;
+  bool readyExpanded_ = true;
   std::chrono::steady_clock::time_point began_,lastRead_;
 #ifdef _WIN32
   void* process_ = nullptr;

@@ -53,9 +53,10 @@ void applyDesktopStyle(float scale) {
   s.Colors[ImGuiCol_Button]={.14f,.19f,.21f,1};
   s.Colors[ImGuiCol_ButtonHovered]={.20f,.28f,.30f,1};
   s.Colors[ImGuiCol_ButtonActive]={.25f,.36f,.36f,1};
-  s.Colors[ImGuiCol_Header]={.12f,.23f,.24f,1};
+  s.Colors[ImGuiCol_Header]={.10f,.15f,.17f,1};
   s.Colors[ImGuiCol_HeaderHovered]={.17f,.31f,.32f,1};
   s.Colors[ImGuiCol_HeaderActive]={.22f,.36f,.35f,1};
+  s.Colors[ImGuiCol_PlotHistogram]=accent;
   s.Colors[ImGuiCol_CheckMark]=accent;s.Colors[ImGuiCol_SliderGrab]=accent;
   s.Colors[ImGuiCol_SliderGrabActive]={.49f,.96f,.79f,1};
   s.Colors[ImGuiCol_Separator]={.14f,.19f,.21f,1};
@@ -101,11 +102,11 @@ void SimulatorView::transport() {
 void SimulatorView::instrument() {
   const float u=unit();
   const auto model=controller_.displayModel();
-  section("ASkompun näyttö");
+
   const auto start=ImGui::GetCursorScreenPos();
   const float width=ImGui::GetContentRegionAvail().x;
   const float inset=18*u;
-  const float screenHeightBudget=std::clamp(ImGui::GetIO().DisplaySize.y*.42f,240*u,480*u);
+  const float screenHeightBudget=std::clamp(ImGui::GetIO().DisplaySize.y*.36f,220*u,360*u);
   const float screenWidth=std::min(width-2*inset,screenHeightBudget*1.5f);
   const float bezelWidth=screenWidth+2*inset;
   const float offset=(width-bezelWidth)/2;
@@ -118,8 +119,7 @@ void SimulatorView::instrument() {
     controller_.paused()?IM_COL32(224,170,95,255):IM_COL32(82,214,176,255));
   drawDeviceDisplay(model,{start.x+offset+inset,start.y+42*u},{screenWidth,screenWidth*320/480},displayFont_);
   ImGui::Dummy({width,height});
-  gap(6);ImGui::PushStyleColor(ImGuiCol_Text,muted);
-  ImGui::TextWrapped("%s",guide(model.screen));ImGui::PopStyleColor();
+  hint(guide(model.screen));
 }
 
 void SimulatorView::vehicle() {
@@ -160,7 +160,7 @@ void SimulatorView::vehicle() {
 void SimulatorView::controls() {
   const float u=unit();
   const float available=ImGui::GetContentRegionAvail().x;
-  const float budget=std::clamp(ImGui::GetIO().DisplaySize.y*.42f,240*u,480*u);
+  const float budget=std::clamp(ImGui::GetIO().DisplaySize.y*.36f,220*u,360*u);
   const float bezel=std::min(available-36*u,budget*1.5f)+36*u;
   const float width=std::min(420*u,bezel-36*u);
   const float left=ImGui::GetCursorPosX()+(available+bezel)/2-width-18*u;
@@ -224,10 +224,11 @@ void SimulatorView::telemetry() {
 }
 
 void SimulatorView::eventLog() {
-  const float u=unit();section("Tapahtumaloki");
+  const float u=unit();
+  if(!ImGui::CollapsingHeader("Tapahtumaloki"))return;
   ImGui::Checkbox("Seuraa uusinta",&followLog_);ImGui::SameLine();
   ImGui::Checkbox("Vain ASkompu",&showApplicationOnly_);
-  if(ImGui::GetContentRegionAvail().x>300*u){ImGui::SameLine();label("Viimeisimmät 512 havaintoa");}
+  hint("Lokissa säilyvät viimeisimmät 512 havaintoa.");
   ImGui::BeginChild("Lokirivit",{0,190*u},ImGuiChildFlags_AlwaysUseWindowPadding);
   if(ImGui::IsWindowHovered()&&ImGui::GetIO().MouseWheel>0)followLog_=false;
   if(ImGui::BeginTable("Tapahtumat",3,ImGuiTableFlags_RowBg|ImGuiTableFlags_SizingStretchProp)) {
@@ -335,7 +336,7 @@ void SimulatorView::render() {
   ImGui::TextColored(controller_.paused()?amber:accent,"%s",controller_.paused()?"KESKEYTETTY":"KÄYNNISSÄ");
   ImGui::SameLine();label("·");ImGui::SameLine();
   ImGui::TextUnformatted(durationText(controller_.engine().monotonicMicroseconds()).c_str());
-  ImGui::SameLine();label("Simuloitu aika");
+  hint("Simuloitu aika");
   if(controller_.engine().reverseActive()){ImGui::SameLine();ImGui::TextColored(amber,"  PERUUTUS");}
   gap(4);transport();gap(8);
   const bool wide=ImGui::GetContentRegionAvail().x>=1040*u;
@@ -343,14 +344,19 @@ void SimulatorView::render() {
     ImGui::BeginTable("Päänäkymä",2,ImGuiTableFlags_SizingStretchProp);
     ImGui::TableSetupColumn("Näyttö",ImGuiTableColumnFlags_WidthStretch);
     ImGui::TableSetupColumn("Ohjaimet",ImGuiTableColumnFlags_WidthFixed,330*u);
-    ImGui::TableNextColumn();instrument();gap(8);controls();gap(12);telemetry();
-    ImGui::TableNextColumn();vehicle();
+    ImGui::TableNextColumn();ImGui::BeginChild("Laite",{0,0},ImGuiChildFlags_AutoResizeY|ImGuiChildFlags_AlwaysAutoResize|ImGuiChildFlags_AlwaysUseWindowPadding);
+    instrument();gap(8);controls();ImGui::EndChild();gap(12);
+    ImGui::BeginChild("Mittarit",{0,0},ImGuiChildFlags_AutoResizeY|ImGuiChildFlags_AlwaysAutoResize|ImGuiChildFlags_AlwaysUseWindowPadding);telemetry();ImGui::EndChild();
+    ImGui::TableNextColumn();
+    ImGui::BeginChild("Ajoneuvopaneeli",{0,0},ImGuiChildFlags_AutoResizeY|ImGuiChildFlags_AlwaysAutoResize|ImGuiChildFlags_AlwaysUseWindowPadding);vehicle();ImGui::EndChild();
     ImGui::EndTable();
   } else {
-    instrument();gap(8);controls();gap(12);telemetry();gap(18);
-    vehicle();
+    ImGui::BeginChild("Laite",{0,0},ImGuiChildFlags_AutoResizeY|ImGuiChildFlags_AlwaysAutoResize|ImGuiChildFlags_AlwaysUseWindowPadding);
+    instrument();gap(8);controls();ImGui::EndChild();gap(12);
+    ImGui::BeginChild("Mittarit",{0,0},ImGuiChildFlags_AutoResizeY|ImGuiChildFlags_AlwaysAutoResize|ImGuiChildFlags_AlwaysUseWindowPadding);telemetry();ImGui::EndChild();gap(18);
+    ImGui::BeginChild("Ajoneuvopaneeli",{0,0},ImGuiChildFlags_AutoResizeY|ImGuiChildFlags_AlwaysAutoResize|ImGuiChildFlags_AlwaysUseWindowPadding);vehicle();ImGui::EndChild();
   }
-  gap(18);ImGui::Separator();gap(8);eventLog();
+  gap(16);eventLog();
   shortcuts();dialogs();ImGui::End();
 }
 }  // namespace simulator::desktop
