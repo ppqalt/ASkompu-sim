@@ -38,7 +38,13 @@ try {
             throw 'Paketin ajotarkistus ylitti aikarajan.'
         }
         $process.WaitForExit()
-        if ($process.ExitCode -ne 0) { throw "Paketin ajotarkistus epäonnistui: $(Get-Content $stderr -Raw)" }
+        if ($process.ExitCode -ne 0) {
+            Write-Output (Get-Content $stdout -Raw -Encoding utf8)
+            Get-ChildItem -LiteralPath $root -Recurse -File |
+                Where-Object { $_.Name -in @('state.json', 'backend.log', 'operation.log', 'requirements.tsv') } |
+                ForEach-Object { Write-Output $_.FullName; Get-Content -LiteralPath $_.FullName -Raw -Encoding utf8 }
+            throw "Paketin ajotarkistus epäonnistui: $(Get-Content $stderr -Raw)"
+        }
         $result = Get-Content $stdout -Raw -Encoding utf8
         if ($mode -eq '--versio' -and $result -notmatch 'ASkompu-simulaattori 1\.0\.0') { throw 'Versiotuloste puuttuu.' }
         if ($mode -eq '--tarkista' -and $result -notmatch 'pienen ikkunan vieritys') { throw 'GUI-tarkistus ei valmistunut.' }

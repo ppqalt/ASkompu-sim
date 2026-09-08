@@ -8,6 +8,7 @@ bool CoreVersionSmokeCheck::click(SimulatorView& view,const char* title){
   if(it==view.hitRegions().end())return false;
   const auto r=it->second;
   if(r.minimum.y<15||r.maximum.y>io.DisplaySize.y-15){
+    io.AddMouseButtonEvent(0,false);clickPhase_=0;settle_=0;
     io.AddMousePosEvent(8,io.DisplaySize.y*.5f);io.AddMouseWheelEvent(0,r.minimum.y<15?3.f:-3.f);return false;
   }
   io.AddMousePosEvent((r.minimum.x+r.maximum.x)/2,(r.minimum.y+r.maximum.y)/2);
@@ -33,7 +34,12 @@ void CoreVersionSmokeCheck::beforeFrame(SimulatorView& view,SDL_Window* window){
     case 5:if(view.corePhase()=="done"){capture_="ytimen-versiot.bmp";advance();}else if(view.corePhase()=="failed")throw std::runtime_error("Versionvalitsimen versiolistan haku epäonnistui");break;
     case 6:SDL_SetWindowSize(window,780,660);advance();break;
     case 7:capture_="ytimen-versiot-pieni.bmp";advance();break;
-    case 8:if(click(view,"Tarkka commit"))advance();break;
+    case 8:
+      if(click(view,"Tarkka commit")){
+        if(view.hitRegions().count("Ratkaise SHA"))advance();
+        else{clickPhase_=0;settle_=0;}
+      }
+      break;
     case 9:if(click(view,"Ratkaise SHA"))advance();break;
     case 10:if(view.corePhase()=="failed"){capture_="ytimen-versiot-virhe.bmp";advance();}break;
     case 11:
