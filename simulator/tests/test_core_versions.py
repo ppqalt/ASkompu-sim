@@ -187,7 +187,8 @@ class VersionsTest(unittest.TestCase):
         driver.write_text(f'cmake_minimum_required(VERSION 3.25)\ninclude("{validator.as_posix()}")\naskompu_validate_core()\n')
         def check(revision):
             return subprocess.run(['cmake',f'-DASKOMPU_ROOT={self.root}',f'-DASKOMPU_CORE_ROOT={self.repo}',f'-DASKOMPU_CORE_REVISION={revision}','-P',str(driver)],capture_output=True,text=True)
-        self.assertEqual(check(sha).returncode,0)
+        accepted = check(sha)
+        self.assertEqual(accepted.returncode,0,accepted.stdout + accepted.stderr)
         self.assertNotEqual(check(self.old).returncode,0)
         (core/'ApplicationCore.cpp').write_text('// changed after configure')
         self.assertNotEqual(check(sha).returncode,0)

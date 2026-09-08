@@ -1,4 +1,7 @@
 function(askompu_validate_core)
+  # Script-mode callers can supply native Windows separators or path aliases.
+  file(REAL_PATH "${ASKOMPU_ROOT}" ASKOMPU_ROOT)
+  file(REAL_PATH "${ASKOMPU_CORE_ROOT}" ASKOMPU_CORE_ROOT)
   if(NOT EXISTS "${ASKOMPU_CORE_ROOT}/src/core/ApplicationCore.cpp")
     message(FATAL_ERROR "Valitusta ASkompu-lähdehakemistosta puuttuu tuotantoydin")
   endif()
