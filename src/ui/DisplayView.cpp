@@ -1,12 +1,14 @@
 #include "DisplayView.h"
 
-#include <inttypes.h>
 #include <cstdio>
 #include <cstring>
 
 #include "BoardConfig.h"
+#include "DisplayFormatting.h"
 #include "DisplayLayout.h"
+#include "DisplayRenderer.h"
 #include "RouteOrderFormatting.h"
+#include "TftCanvas.h"
 
 namespace ui {
 namespace {
@@ -25,45 +27,6 @@ constexpr uint16_t DISPLAY_RED = TFT_RED;
 constexpr uint16_t DISPLAY_GREEN = TFT_GREEN;
 constexpr uint16_t DISPLAY_WHITE = TFT_WHITE;
 #endif
-
-void formatTrip(char* text, size_t size, int64_t distanceMm) {
-  const bool negative = distanceMm < 0;
-  const uint64_t magnitude = negative
-                                 ? static_cast<uint64_t>(-(distanceMm + 1)) + 1
-                                 : static_cast<uint64_t>(distanceMm);
-  const uint64_t meters = magnitude / 1000ULL;
-  if (meters < 10000ULL) {
-    std::snprintf(text, size, "%s%" PRIu64 ".%03" PRIu64,
-                  negative ? "-" : "",
-                  meters / 1000ULL, meters % 1000ULL);
-  } else {
-    const uint64_t tenMeters = meters / 10ULL;
-    std::snprintf(text, size, "%s%" PRIu64 ".%02" PRIu64,
-                  negative ? "-" : "",
-                  tenMeters / 100ULL, tenMeters % 100ULL);
-  }
-}
-
-void formatDelta(char* text, size_t size, int64_t seconds) {
-  if (seconds > 0)
-    std::snprintf(text, size, "+%" PRId64, seconds);
-  else
-    std::snprintf(text, size, "%" PRId64, seconds);
-}
-
-void formatSegmentValue(char* text, size_t size,
-                        const domain::SegmentDefinition& segment) {
-  if (segment.segmentType == domain::SegmentType::TIME) {
-    std::snprintf(text, size, "%lu:%02lu",
-                  static_cast<unsigned long>(segment.value / 60),
-                  static_cast<unsigned long>(segment.value % 60));
-  } else if (segment.segmentType == domain::SegmentType::SPEED) {
-    std::snprintf(text, size, "%lu",
-                  static_cast<unsigned long>(segment.value));
-  } else {
-    text[0] = '\0';
-  }
-}
 
 const char* eventTypeName(domain::DomainEventType type) {
   switch (type) {
@@ -112,19 +75,6 @@ uint32_t menuRowsFingerprint(const core::MenuDisplayModel& model) {
     hash = (hash ^ model.rows[row].enabled) * 16777619UL;
   }
   return hash;
-}
-
-uint8_t menuTextScale(domain::MenuFontSize size) {
-  return static_cast<uint8_t>(size) + 1U;
-}
-
-const char* footerLabel(const char* text) {
-  if (!text) return "";
-  const char* separator = std::strchr(text, ':');
-  if (!separator) return text;
-  ++separator;
-  while (*separator == ' ') ++separator;
-  return separator;
 }
 
 bool sameClock(const core::ClockTime& first, const core::ClockTime& second) {
@@ -260,19 +210,11 @@ uint16_t DisplayView::height() const { return BoardConfig::DISPLAY_HEIGHT; }
 
 void DisplayView::drawFooter(const char* left, const char* upDown,
                              const char* right, uint16_t color) {
-  if (!showLabels_) return;
-  canvas_.setTextColor(color, DISPLAY_BACKGROUND_COLOR);
-  const int16_t y = BoardConfig::DISPLAY_HEIGHT - 6;
-  const auto drawLabel = [&](const char* text, uint8_t datum, int16_t x) {
-    text = footerLabel(text);
-    if (!text[0]) return;
-    canvas_.setTextSize(menuTextScale(menuFontSize_));
-    canvas_.setTextDatum(datum);
-    canvas_.drawString(text, x, y, 1);
-  };
-  drawLabel(left, BL_DATUM, 4);
-  drawLabel(upDown, BC_DATUM, BoardConfig::DISPLAY_WIDTH / 2);
-  drawLabel(right, BR_DATUM, BoardConfig::DISPLAY_WIDTH - 4);
+  TftCanvas surface(canvas_);
+  DisplayRenderer<TftCanvas>::drawFooter(
+      surface, BoardConfig::DISPLAY_WIDTH, BoardConfig::DISPLAY_HEIGHT,
+      DISPLAY_BACKGROUND_COLOR, left, upDown, right, color, showLabels_,
+      menuFontSize_);
 }
 
 void DisplayView::render(const core::DisplayModel& model) {
@@ -380,23 +322,16 @@ void DisplayView::render(const core::DisplayModel& model) {
   } else if (model.screen == core::Screen::Menu) {
     const uint32_t titleFingerprint = textFingerprint(model.menu.title);
     const uint32_t rowsFingerprint = menuRowsFingerprint(model.menu);
-    if (titleFingerprint != menuTitleFingerprint_) {
-      canvas_.pushSprite(0, 0);
-    } else if (rowsFingerprint != menuRowsFingerprint_) {
-      const int16_t top = BoardConfig::DISPLAY_WIDTH >= 480 ? 56 : 30;
-      canvas_.pushSprite(0, top, 0, top, BoardConfig::DISPLAY_WIDTH,
-                         BoardConfig::DISPLAY_HEIGHT - top);
-    } else if (lastModel_.menu.selectedVisibleRow !=
-               model.menu.selectedVisibleRow) {
-      const int16_t top = BoardConfig::DISPLAY_WIDTH >= 480 ? 56 : 30;
-      const int16_t rowHeight =
-          (BoardConfig::DISPLAY_HEIGHT - top - 8) /
-          core::MENU_VISIBLE_ROWS;
-      const int16_t oldY =
-          top + lastModel_.menu.selectedVisibleRow * rowHeight;
-      const int16_t newY = top + model.menu.selectedVisibleRow * rowHeight;
-      canvas_.pushSprite(0, oldY, 0, oldY, 12, rowHeight);
-      canvas_.pushSprite(0, newY, 0, newY, 12, rowHeight);
+    const MenuTransferPlan plan = DisplayRenderer<TftCanvas>::menuTransferPlan(
+        BoardConfig::DISPLAY_WIDTH, BoardConfig::DISPLAY_HEIGHT, false,
+        titleFingerprint != menuTitleFingerprint_,
+        rowsFingerprint != menuRowsFingerprint_,
+        lastModel_.menu.selectedVisibleRow, model.menu.selectedVisibleRow);
+    TftCanvas surface(canvas_);
+    for (uint8_t index = 0; index < plan.count; ++index) {
+      const TransferRegion& region = plan.regions[index];
+      surface.present(region.x, region.y, region.x, region.y, region.width,
+                      region.height);
     }
     menuTitleFingerprint_ = titleFingerprint;
     menuRowsFingerprint_ = rowsFingerprint;
@@ -832,68 +767,17 @@ void DisplayView::showFinishResult(
 }
 
 void DisplayView::showTimeEntry(const core::TimeEntryDisplayModel& model) {
-  char value[20];
-  if (model.activeField == core::TimeField::Hour)
-    std::snprintf(value, sizeof(value), "[%02u]:%02u", model.hour,
-                  model.minute);
-  else
-    std::snprintf(value, sizeof(value), "%02u:[%02u]", model.hour,
-                  model.minute);
-  const int16_t centerX = BoardConfig::DISPLAY_WIDTH / 2;
-  const int16_t valueY = BoardConfig::DISPLAY_HEIGHT * 46 / 100;
-  const uint8_t valueScale = BoardConfig::DISPLAY_WIDTH >= 480 ? 4 : 3;
-  canvas_.setTextDatum(TC_DATUM);
-  canvas_.setTextColor(textColor_, DISPLAY_BACKGROUND_COLOR);
-  canvas_.drawString(model.startup ? "ASETA KELLONAIKA" : "MUUTA KELLONAIKA",
-                     centerX, 12, 2);
-  canvas_.setTextSize(valueScale);
-  canvas_.setTextDatum(MC_DATUM);
-  canvas_.setTextColor(textColor_, DISPLAY_BACKGROUND_COLOR);
-  canvas_.drawString(value, centerX, valueY, 2);
-  drawFooter("", "YLOS/ALAS: MUUTA", "OIKEA: JATKA", textColor_);
+  TftCanvas surface(canvas_);
+  DisplayRenderer<TftCanvas>::renderTimeEntry(
+      surface, BoardConfig::DISPLAY_WIDTH, BoardConfig::DISPLAY_HEIGHT,
+      DISPLAY_BACKGROUND_COLOR, model, textColor_, showLabels_, menuFontSize_);
 }
 
 void DisplayView::showMenu(const core::MenuDisplayModel& model) {
-  const bool large = BoardConfig::DISPLAY_WIDTH >= 480;
-  const uint8_t textScale = menuTextScale(menuFontSize_);
-  const int16_t top = large ? 56 : 30;
-  const int16_t rowHeight =
-      (BoardConfig::DISPLAY_HEIGHT - top - 8) / core::MENU_VISIBLE_ROWS;
-  canvas_.setTextDatum(TC_DATUM);
-  canvas_.setTextColor(textColor_, DISPLAY_BACKGROUND_COLOR);
-  canvas_.setTextSize(textScale);
-  canvas_.drawString(model.title, BoardConfig::DISPLAY_WIDTH / 2, 5, 2);
-  for (uint8_t row = 0; row < model.visibleRowCount; ++row) {
-    const bool selected = row == model.selectedVisibleRow;
-    const uint16_t background = DISPLAY_BACKGROUND_COLOR;
-    canvas_.fillRect(5, top + row * rowHeight,
-                     BoardConfig::DISPLAY_WIDTH - 10, rowHeight - 2,
-                     background);
-    if (selected) {
-      canvas_.fillRect(5, top + row * rowHeight + 5, 5, rowHeight - 12,
-                       textColor_);
-    }
-    canvas_.setTextDatum(ML_DATUM);
-    canvas_.setTextColor(textColor_, background);
-    canvas_.setTextSize(textScale);
-    canvas_.drawString(model.rows[row].label, 18,
-                       top + row * rowHeight + rowHeight / 2, 2);
-    if (!model.rows[row].enabled) {
-      canvas_.setTextDatum(MR_DATUM);
-      canvas_.drawString("--", BoardConfig::DISPLAY_WIDTH - 13,
-                         top + row * rowHeight + rowHeight / 2, 2);
-    }
-  }
-  if (model.scrollOffset > 0) {
-    const int16_t x = BoardConfig::DISPLAY_WIDTH - 10;
-    canvas_.fillTriangle(x, top + 2, x - 6, top + 10, x + 6, top + 10,
-                         textColor_);
-  }
-  if (model.scrollOffset + model.visibleRowCount < model.totalRows) {
-    const int16_t x = BoardConfig::DISPLAY_WIDTH - 10;
-    const int16_t y = BoardConfig::DISPLAY_HEIGHT - 4;
-    canvas_.fillTriangle(x, y, x - 6, y - 8, x + 6, y - 8, textColor_);
-  }
+  TftCanvas surface(canvas_);
+  DisplayRenderer<TftCanvas>::renderMenu(
+      surface, BoardConfig::DISPLAY_WIDTH, BoardConfig::DISPLAY_HEIGHT,
+      DISPLAY_BACKGROUND_COLOR, model, textColor_, menuFontSize_);
 }
 
 void DisplayView::showCalibration(
