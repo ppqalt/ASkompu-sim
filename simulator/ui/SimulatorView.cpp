@@ -107,19 +107,37 @@ void SimulatorView::instrument() {
   const float width=ImGui::GetContentRegionAvail().x;
   const float inset=18*u;
   const float screenHeightBudget=std::clamp(ImGui::GetIO().DisplaySize.y*.36f,220*u,360*u);
-  const float screenWidth=std::min(width-2*inset,screenHeightBudget*1.5f);
+  constexpr uint16_t nativeWidth=ASKOMPU_DISPLAY_WIDTH,nativeHeight=ASKOMPU_DISPLAY_HEIGHT;
+  const float aspect=static_cast<float>(nativeWidth)/nativeHeight;
+  const float screenWidth=std::min(width-2*inset,screenHeightBudget*aspect);
   const float bezelWidth=screenWidth+2*inset;
   const float offset=(width-bezelWidth)/2;
-  const float height=screenWidth*320/480+60*u;
+  const float height=screenWidth/aspect+60*u;
   auto* draw=ImGui::GetWindowDrawList();
   draw->AddRectFilled({start.x+offset,start.y},{start.x+offset+bezelWidth,start.y+height},IM_COL32(16,23,27,255),14*u);
   draw->AddRect({start.x+offset,start.y},{start.x+offset+bezelWidth,start.y+height},IM_COL32(42,56,62,255),14*u,0,1*u);
   draw->AddText({start.x+offset+inset,start.y+12*u},IM_COL32(146,168,177,255),"ASkompu");
   draw->AddCircleFilled({start.x+offset+bezelWidth-inset,start.y+21*u},3*u,
     controller_.paused()?IM_COL32(224,170,95,255):IM_COL32(82,214,176,255));
-  drawDeviceDisplay(model,{start.x+offset+inset,start.y+42*u},{screenWidth,screenWidth*320/480},displayFont_);
+  rendererMode_=deviceDisplay_.draw(model,{start.x+offset+inset,start.y+42*u},
+      {screenWidth,screenWidth/aspect},displayFont_,nativeWidth,nativeHeight);
+  char status[100];std::snprintf(status,sizeof(status),"%s · %.10s · %u×%u",
+      rendererMode_==DeviceRendererMode::Shared?"REAL":"Esikatselu",build::coreRevision,nativeWidth,nativeHeight);
+  const auto statusSize=ImGui::CalcTextSize(status);
+  const float statusX=start.x+offset+(bezelWidth-statusSize.x)/2;
+  draw->AddText({statusX,start.y+12*u},ImGui::ColorConvertFloat4ToU32(
+      rendererMode_==DeviceRendererMode::Shared?accent:amber),status);
   ImGui::Dummy({width,height});
   hint(guide(model.screen));
+  if(rendererMode_==DeviceRendererMode::Shared){
+    label("Näytön skaalaus");ImGui::SameLine();
+    if(button("Nearest",{},deviceDisplay_.scaling()==DisplayScaling::Nearest))deviceDisplay_.setScaling(DisplayScaling::Nearest);
+    ImGui::SameLine();if(button("Linear",{},deviceDisplay_.scaling()==DisplayScaling::Linear))deviceDisplay_.setScaling(DisplayScaling::Linear);
+    hint("Vain työpöytäkuvan suodatus. Nearest näyttää alkuperäiset näyttöpikselit.");
+  }else{
+    label("Simulaattorin esikatselunäkymä");
+    hint("Valitussa ASkompu-versiossa ei ole yhteistä REAL-rendereriä. Oikea ASkompu-logiikka on käytössä, mutta tämä näkymä ei ole firmwaren tarkka pikselikuva.");
+  }
 }
 
 void SimulatorView::vehicle() {
@@ -303,6 +321,8 @@ void SimulatorView::dialogs() {
       ImGui::Text("Versio: %s · %s",build::version,build::configuration());
       ImGui::TextWrapped("Lähderevisio: %s",build::revision);
       ImGui::TextWrapped("ASkompu-ydin: %s",build::coreRevision);
+      if(std::string(build::sourceKind)=="local")ImGui::TextWrapped("Paikallinen ASkompu: %s",build::sourcePath);
+      ImGui::TextWrapped("Näyttö: %s",rendererModeName(rendererMode_));
       ImGui::TextWrapped("Työpuu: %s",build::worktree);
       ImGui::TextWrapped("Yhteinen upstream-pohja: %s",build::upstreamBase);
       ImGui::TextWrapped("ASkompu-lähteiden tiiviste: %.16s",build::coreFingerprint);
@@ -324,7 +344,7 @@ void SimulatorView::render() {
   if(ImGui::GetContentRegionAvail().x>=640*u)ImGui::SameLine(250*u);else gap(4);
   if(button("Simulaattori",{140*u,36*u},!corePage_))corePage_=false;
   ImGui::SameLine();
-  if(button("Ytimen versio",{150*u,36*u},corePage_)){corePage_=true;controller_.pause();}
+  if(button("ASkompu-versio",{160*u,36*u},corePage_)){corePage_=true;controller_.pause();}
   ImGui::SameLine(ImGui::GetWindowContentRegionMax().x-82*u);
   if(button("Ohje",{82*u,36*u}))helpOpen_=true;
   if(corePage_) {

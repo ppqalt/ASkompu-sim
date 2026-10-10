@@ -5,7 +5,7 @@
 namespace simulator::desktop {
 class CoreVersionSmokeCheck {
  public:
-  CoreVersionSmokeCheck(std::string directory,bool build):directory_(std::move(directory)),build_(build){}
+  CoreVersionSmokeCheck(std::string directory,bool build,bool local=false):directory_(std::move(directory)),build_(build),local_(local){}
   void beforeFrame(SimulatorView& view,SDL_Window* window);
   void afterRender(SDL_Renderer* renderer);
   bool finished() const{return finished_;}
@@ -13,7 +13,7 @@ class CoreVersionSmokeCheck {
   bool click(SimulatorView& view,const char* title);
   void advance(){++step_;clickPhase_=0;settle_=0;}
   std::string directory_,capture_;
-  bool build_=false,finished_=false;
+  bool build_=false,local_=false,finished_=false;
   unsigned step_=0,clickPhase_=0,settle_=0;
   double started_=0;
 };

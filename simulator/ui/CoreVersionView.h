@@ -12,7 +12,7 @@ struct CoreVersion { std::string kind,label,sha,date,subject,body,tag; };
 // Git-, CMake-, testaus- tai restart-logiikkaa ei toteuteta uudelleen GUI:ssa.
 class CoreVersionView {
  public:
-  CoreVersionView(std::string home = {}, std::string upstream = {});
+  CoreVersionView(std::string home = {}, std::string upstream = {}, std::string local = {});
   ~CoreVersionView();
   CoreVersionView(const CoreVersionView&) = delete;
   CoreVersionView& operator=(const CoreVersionView&) = delete;
@@ -23,6 +23,8 @@ class CoreVersionView {
   void cancel();
   const std::map<std::string,std::pair<ImVec2,ImVec2>>& hitRegions() const { return hits_; }
   const std::string& phase() const { return phase_; }
+  const std::string& operation() const { return operation_; }
+  bool localSourceReady() const { return localChecked_; }
  private:
   void start(const std::string& operation, const std::vector<std::string>& extra = {});
   bool spawn(const std::vector<std::string>& arguments);
@@ -33,6 +35,10 @@ class CoreVersionView {
   void progressCard();
   float versionList();
   void requirementsCard();
+  void localCard();
+  void folderPicker();
+  void navigateFolder(const std::filesystem::path& path);
+  void saveLocalPreference();
   std::filesystem::path home_,script_,bundle_,executable_,job_;
   std::string upstream_,operation_,phase_="idle",message_,error_,log_,readyArtifact_,readyLabel_,previous_;
   std::vector<CoreVersion> versions_;
@@ -42,7 +48,14 @@ class CoreVersionView {
   std::map<std::string,std::pair<ImVec2,ImVec2>> hits_;
   char exactSha_[96] = {};
   char filter_[160] = {};
+  char localPath_[2048] = {};
+  std::string checkedLocalPath_,localSubject_,localSha_,localFingerprint_;
+  std::filesystem::path browsePath_;
+  std::vector<std::filesystem::path> browseFolders_;
+  std::string browseError_;
   int category_ = 0;
+  int sourceMode_ = 1, profile_ = 1;
+  bool localChecked_ = false,localDirty_ = false,localHasGit_ = false,folderOpen_ = false;
   bool scrollTop_ = false;
   bool initialized_ = false, running_ = false, requirementsOk_ = false, closeRequested_ = false;
   bool restartPending_ = false, rollbackPending_ = false;

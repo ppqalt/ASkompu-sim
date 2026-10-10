@@ -16,9 +16,21 @@ endif()
 get_filename_component(ASKOMPU_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
 set(ASKOMPU_CORE_ROOT "${ASKOMPU_ROOT}" CACHE PATH "Valitun ASkompu-ytimen lähdehakemisto")
 set(ASKOMPU_CORE_REVISION "" CACHE STRING "Erillisen ytimen lukittu täysi Git-SHA")
+set(ASKOMPU_CORE_SNAPSHOT "" CACHE FILEPATH "Paikallisen lähdekopion varmennettu manifesti")
 file(REAL_PATH "${ASKOMPU_CORE_ROOT}" ASKOMPU_CORE_ROOT)
 include(cmake/ValidateCore.cmake)
 askompu_validate_core()
+set(ASKOMPU_DISPLAY_PROFILE "480x320" CACHE STRING "ASkompun näyttöprofiili")
+set_property(CACHE ASKOMPU_DISPLAY_PROFILE PROPERTY STRINGS "320x170" "480x320")
+if(ASKOMPU_DISPLAY_PROFILE STREQUAL "320x170")
+  set(ASKOMPU_DISPLAY_WIDTH 320)
+  set(ASKOMPU_DISPLAY_HEIGHT 170)
+elseif(ASKOMPU_DISPLAY_PROFILE STREQUAL "480x320")
+  set(ASKOMPU_DISPLAY_WIDTH 480)
+  set(ASKOMPU_DISPLAY_HEIGHT 320)
+else()
+  message(FATAL_ERROR "ASKOMPU_DISPLAY_PROFILE on oltava 320x170 tai 480x320")
+endif()
 add_library(askompu_core STATIC
   ${ASKOMPU_CORE_ROOT}/src/core/ApplicationCore.cpp
   ${ASKOMPU_CORE_ROOT}/src/core/Clock.cpp
@@ -35,6 +47,32 @@ add_library(askompu_core STATIC
 )
 target_include_directories(askompu_core PUBLIC
   ${ASKOMPU_CORE_ROOT}/src ${ASKOMPU_CORE_ROOT}/include)
+
+# REAL comes entirely from the selected ASkompu tree. No firmware graphics are
+# copied into this desktop branch; older cores retain the original preview.
+set(ASKOMPU_HAS_SHARED_DISPLAY_RENDERER 0)
+if(EXISTS "${ASKOMPU_CORE_ROOT}/src/ui/DisplayRenderer.h" AND
+   EXISTS "${ASKOMPU_CORE_ROOT}/test/portable_display/FramebufferCanvas.h" AND
+   EXISTS "${ASKOMPU_CORE_ROOT}/test/portable_display/FramebufferCanvas.cpp")
+  file(STRINGS "${ASKOMPU_CORE_ROOT}/src/ui/DisplayRenderer.h" renderer_api REGEX "renderScreen")
+  if(renderer_api)
+    set(ASKOMPU_HAS_SHARED_DISPLAY_RENDERER 1)
+  endif()
+endif()
+add_library(askompu_shared_display STATIC ui/SharedDisplayFramebuffer.cpp)
+target_link_libraries(askompu_shared_display PUBLIC askompu_core)
+target_include_directories(askompu_shared_display PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_compile_definitions(askompu_shared_display PUBLIC
+  ASKOMPU_HAS_SHARED_DISPLAY_RENDERER=${ASKOMPU_HAS_SHARED_DISPLAY_RENDERER})
+if(ASKOMPU_HAS_SHARED_DISPLAY_RENDERER)
+  target_sources(askompu_shared_display PRIVATE
+    "${ASKOMPU_CORE_ROOT}/test/portable_display/FramebufferCanvas.cpp"
+    "${ASKOMPU_CORE_ROOT}/src/ui/DisplayFormatting.cpp"
+    "${ASKOMPU_CORE_ROOT}/src/ui/DisplayLayout.cpp"
+    "${ASKOMPU_CORE_ROOT}/src/ui/RouteOrderFormatting.cpp")
+  target_include_directories(askompu_shared_display PRIVATE
+    "${ASKOMPU_CORE_ROOT}/test/portable_display")
+endif()
 
 add_library(askompu_simulator STATIC
   engine/SimulatorEngine.cpp engine/WheelPulseGenerator.cpp)
@@ -69,7 +107,10 @@ if(ASKOMPU_BUILD_GUI)
   else()
     target_compile_definitions(askompu-simulaattori PRIVATE SDL_MAIN_HANDLED)
   endif()
-  target_link_libraries(askompu-simulaattori PRIVATE askompu_desktop_controller askompu_imgui)
+  target_link_libraries(askompu-simulaattori PRIVATE askompu_desktop_controller askompu_imgui askompu_shared_display)
+  target_compile_definitions(askompu-simulaattori PRIVATE
+    ASKOMPU_DISPLAY_WIDTH=${ASKOMPU_DISPLAY_WIDTH}
+    ASKOMPU_DISPLAY_HEIGHT=${ASKOMPU_DISPLAY_HEIGHT})
   include(cmake/BuildInformation.cmake)
   include(cmake/Packaging.cmake)
 endif()
@@ -81,6 +122,9 @@ if(BUILD_TESTING)
   add_executable(simulator_tests tests/SimulatorEngineTests.cpp)
   target_link_libraries(simulator_tests PRIVATE askompu_simulator)
   add_test(NAME simulaattori COMMAND simulator_tests)
+  add_executable(shared_display_tests tests/SharedDisplayFramebufferTests.cpp)
+  target_link_libraries(shared_display_tests PRIVATE askompu_shared_display)
+  add_test(NAME yhteinen_nayttorenderer COMMAND shared_display_tests)
 
   # Valinnainen: alkuperäiset Unity-testit sellaisinaan, ilman PlatformIO-muutoksia.
   set(ASKOMPU_UNITY_SOURCE_DIR "" CACHE PATH "Unity-kirjaston src-hakemisto")

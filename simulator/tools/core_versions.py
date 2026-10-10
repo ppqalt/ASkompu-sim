@@ -13,9 +13,11 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import platform
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import time
@@ -26,6 +28,24 @@ import zipfile
 UPSTREAM = 'https://github.com/Mikky100/ASkompu.git'
 SHA = re.compile(r'^[0-9a-fA-F]{40}$')
 TERMINAL = {'ready', 'done', 'failed', 'cancelled', 'launched'}
+LOCAL_TREES = ('src', 'include', 'test')
+LOCAL_FILES = ('LICENSE', 'LICENSE.txt', 'COPYING', 'platformio.ini')
+LOCAL_REQUIRED = (
+    'src/core/ApplicationCore.cpp', 'src/core/ApplicationCore.h', 'src/core/DisplayModel.h',
+    'src/core/Clock.cpp', 'src/domain/CalibrationSetting.cpp',
+    'src/domain/CompetitionEngine.cpp', 'src/domain/CompetitionRecords.cpp',
+    'src/domain/EventRepository.cpp', 'src/domain/MotionMath.cpp',
+    'src/domain/RouteOrder.cpp', 'src/domain/SpeedCalculator.cpp', 'src/domain/TripCounter.cpp',
+    'src/route/RouteOrderCodec.cpp', 'src/route/RouteOrderEditor.cpp',
+    'src/input/ButtonInterpreter.cpp', 'src/ui/DisplayLayout.cpp', 'src/ui/RouteOrderFormatting.cpp',
+    'test/test_motion_math/test_main.cpp', 'test/test_competition/test_main.cpp',
+    'test/test_competition_records/test_main.cpp', 'test/test_display_layout/test_main.cpp',
+    'test/test_board_profiles/test_main.cpp',
+)
+SNAPSHOT_NAME = 'snapshot-manifest.json'
+SNAPSHOT_LIMIT = 128 * 1024 * 1024
+LOCAL_EXCLUDED_DIRS = {'.git', '.pio', 'simulator', 'build', '__pycache__'}
+LOCAL_EXCLUDED_SUFFIXES = {'.o', '.obj', '.pyc', '.exe', '.elf', '.a', '.so', '.dll', '.zip', '.tar', '.gz'}
 
 
 class Cancelled(Exception):
@@ -34,6 +54,120 @@ class Cancelled(Exception):
 
 class VersionError(Exception):
     pass
+
+
+def local_relative_path(value):
+    """Only source paths that are also safe CMake list members are accepted."""
+    if (not isinstance(value, str) or not value or any(ord(c) < 32 for c in value)
+            or any(c in value for c in ('\\', ';', ':'))):
+        raise VersionError('Paikallisessa lähteessä on virheellinen tiedostopolku.')
+    parts = value.split('/')
+    if any(part in ('', '.', '..') for part in parts):
+        raise VersionError('Paikallisen lähteen polku poistuu lähdehakemistosta.')
+    if not ((parts[0] in LOCAL_TREES and len(parts) > 1) or value in LOCAL_FILES):
+        raise VersionError('Tilannekuvassa on ASkompu-lähteisiin kuulumaton tiedosto: ' + value)
+    return value
+
+
+def source_fingerprint(files):
+    return hashlib.sha256(''.join(f'{f["path"]}:{f["sha256"]}\n' for f in files).encode('utf-8')).hexdigest()
+
+
+def checked_read(root: Path, relative):
+    path = root / local_relative_path(relative)
+    # Reject symlinks (including ancestors); never follow a link outside the source.
+    for ancestor in (path, *path.parents):
+        if ancestor == root:
+            break
+        if ancestor.is_symlink():
+            raise VersionError('Paikallinen lähde sisältää symbolisen linkin: ' + relative)
+    if not path.resolve().is_relative_to(root):
+        raise VersionError('Paikallisen lähteen polku poistuu lähdehakemistosta.')
+    before = path.stat(follow_symlinks=False)
+    if not stat.S_ISREG(before.st_mode) or before.st_size > 32 * 1024 * 1024:
+        raise VersionError('Paikallisessa lähteessä on virheellinen tiedostotyyppi tai koko: ' + relative)
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0))
+    with os.fdopen(descriptor, 'rb') as stream:
+        opened = os.fstat(stream.fileno())
+        if not stat.S_ISREG(opened.st_mode) or (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino):
+            raise VersionError('Paikallinen lähde muuttui tarkistuksen aikana. Yritä uudelleen.')
+        data = stream.read(32 * 1024 * 1024 + 1)
+        after = os.fstat(stream.fileno())
+    if (before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (after.st_size, after.st_mtime_ns, after.st_ctime_ns) or len(data) != before.st_size:
+        raise VersionError('Paikallinen lähde muuttui tarkistuksen aikana. Yritä uudelleen.')
+    return data
+
+
+def local_inventory(root: Path):
+    paths = []
+    def visit(directory):
+        if directory.is_symlink():
+            raise VersionError('Paikallinen lähde sisältää symbolisen linkin: ' + str(directory.relative_to(root)))
+        for child in sorted(directory.iterdir()):
+            if child.name in LOCAL_EXCLUDED_DIRS or child.suffix.lower() in LOCAL_EXCLUDED_SUFFIXES:
+                continue
+            if child.is_symlink():
+                raise VersionError('Paikallinen lähde sisältää symbolisen linkin: ' + str(child.relative_to(root)))
+            if child.is_dir():
+                visit(child)
+            else:
+                paths.append(child.relative_to(root).as_posix())
+    for name in LOCAL_TREES:
+        directory = root / name
+        if not directory.is_dir():
+            raise VersionError('ASkompu-lähdehakemistosta puuttuu ' + name)
+        visit(directory)
+    for name in LOCAL_FILES:
+        if (root / name).exists() or (root / name).is_symlink():
+            paths.append(name)
+    files, total = [], 0
+    for relative in sorted(paths):
+        data = checked_read(root, relative)
+        total += len(data)
+        if total > SNAPSHOT_LIMIT:
+            raise VersionError('Paikallinen ASkompu-lähde ylittää tilannekuvan kokorajan.')
+        files.append({'path': relative, 'sha256': hashlib.sha256(data).hexdigest(), 'size': len(data)})
+    missing = set(LOCAL_REQUIRED).difference(paths)
+    if missing:
+        raise VersionError('Hakemisto ei sisällä yhteensopivaa ASkompu-lähderakennetta. Puuttuu: ' + ', '.join(sorted(missing)))
+    return files
+
+
+def verify_snapshot(core: Path, manifest_path: Path):
+    """Verify both hashes and complete inventory before build/test/install."""
+    if core.is_symlink() or manifest_path.is_symlink() or manifest_path.resolve() != core.resolve() / SNAPSHOT_NAME:
+        raise VersionError('Tilannekuvan manifesti ei ole sen omassa juurihakemistossa.')
+    manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+    if manifest.get('manifest_version') != 1 or manifest.get('source_kind') != 'local':
+        raise VersionError('Tuntematon paikallisen tilannekuvan muoto.')
+    if (type(manifest.get('git')) is not int or manifest['git'] not in (0, 1) or
+        type(manifest.get('dirty')) is not int or manifest['dirty'] not in (0, 1) or
+        not isinstance(manifest.get('sha'), str) or
+        not (SHA.fullmatch(manifest['sha']) or manifest['sha'] == 'tuntematon' and not manifest['git']) or
+        not isinstance(manifest.get('local_path'), str) or not os.path.isabs(manifest['local_path'])):
+        raise VersionError('Tilannekuvan alkuperätiedot ovat virheelliset.')
+    expected = manifest.get('files')
+    if not isinstance(expected, list) or not expected:
+        raise VersionError('Tilannekuvan tiedostoluettelo puuttuu.')
+    for record in expected:
+        if not isinstance(record, dict):
+            raise VersionError('Virheellinen tilannekuvan tiedostotunniste.')
+        local_relative_path(record.get('path'))
+        if not isinstance(record.get('sha256'), str) or not re.fullmatch('[0-9a-f]{64}', record['sha256']) or type(record.get('size')) is not int or record['size'] < 0:
+            raise VersionError('Virheellinen tilannekuvan tiedostotunniste.')
+    paths = [f['path'] for f in expected]
+    if paths != sorted(set(paths)) or source_fingerprint(expected) != manifest.get('fingerprint'):
+        raise VersionError('Tilannekuvan manifesti ei vastaa lähdetiivistettä.')
+    actual = local_inventory(core.resolve())
+    all_paths = []
+    for path in core.rglob('*'):
+        if path.is_symlink():
+            raise VersionError('Tilannekuvaan on lisätty symbolinen linkki.')
+        if path.is_file():
+            all_paths.append(path.relative_to(core).as_posix())
+    if actual != expected or sorted(all_paths) != sorted(paths + [SNAPSHOT_NAME]):
+        raise VersionError('Paikallinen tilannekuva muuttui. Rakennus estetty.')
+    return manifest
 
 
 def atomic(path: Path, text: str):
@@ -205,7 +339,7 @@ class Backend:
         return output.strip()
 
     def git(self, *arguments, cwd=None):
-        env = dict(os.environ, GIT_TERMINAL_PROMPT='0', GCM_INTERACTIVE='never', GIT_CONFIG_NOSYSTEM='1')
+        env = dict(os.environ, GIT_TERMINAL_PROMPT='0', GCM_INTERACTIVE='never', GIT_CONFIG_NOSYSTEM='1', GIT_OPTIONAL_LOCKS='0')
         return self.run(['git', '-c', 'core.autocrlf=false', '-c', 'core.hooksPath=',
                          '-c', 'protocol.ext.allow=never', *arguments], cwd=cwd, timeout=180, env=env)
 
@@ -303,52 +437,219 @@ class Backend:
         if self.git('rev-parse', 'HEAD', cwd=core) != sha or self.git('status', '--porcelain', '--untracked-files=normal', cwd=core):
             raise VersionError('Lähdekoodi ei vastaa lukittua puhdasta SHA:ta. Rakennus estetty.')
 
-    def build(self, ref, bundle: Path, cmake_options=()):
+    def local_metadata(self, root):
+        metadata = {'sha': 'tuntematon', 'date': 'tuntematon', 'tag': '', 'subject': root.name,
+                    'body': '', 'dirty': 0, 'git': 0, 'source_kind': 'local',
+                    'local_path': str(root), 'path': str(root)}
+        if not shutil.which('git'):
+            return metadata
+        try:
+            git_root = self.git('rev-parse', '--show-toplevel', cwd=root)
+        except VersionError:
+            return metadata
+        # A directory inside an unrelated repository must not borrow its HEAD.
+        if Path(git_root).resolve() != root:
+            return metadata
+        sha = self.git('rev-parse', '--verify', 'HEAD', cwd=root)
+        if not SHA.fullmatch(sha):
+            raise VersionError('Paikallisen Git-lähteen HEAD ei ole kelvollinen commit.')
+        metadata.update(self.describe(root, sha))
+        metadata.update(git=1, dirty=int(bool(self.git('status', '--porcelain', '--untracked-files=normal', cwd=root))))
+        return metadata
+
+    def inspect_local(self, path: Path, publish=True):
+        root = path.expanduser().resolve()
+        if not root.is_dir():
+            raise VersionError('Paikallista ASkompu-lähdehakemistoa ei löydy.')
+        if self.home.is_relative_to(root) or self.job.is_relative_to(root):
+            raise VersionError('Rakennuksen työtilan ja lokien pitää sijaita ASkompu-lähteen ulkopuolella.')
+        files = local_inventory(root)
+        selected = dict(self.local_metadata(root), fingerprint=source_fingerprint(files),
+                        file_count=len(files), compatibility_ok=1,
+                        compatibility_message='Lähderakenne tunnistettu; API-yhteensopivuus varmistuu rakennuksessa ja testeissä')
+        if publish:
+            self.publish('done', 'Paikallinen ASkompu-lähde tarkistettu', **selected)
+        return selected
+
+    def capture_local(self, path: Path, core: Path):
+        root = path.expanduser().resolve()
+        selected = self.inspect_local(root, publish=False)
+        files = local_inventory(root)
+        if source_fingerprint(files) != selected['fingerprint']:
+            raise VersionError('Paikallinen lähde muuttui tarkistuksen aikana. Yritä uudelleen.')
+        core.mkdir(parents=True)
+        try:
+            for record in files:
+                self.check_cancel()
+                data = checked_read(root, record['path'])
+                if len(data) != record['size'] or hashlib.sha256(data).hexdigest() != record['sha256']:
+                    raise VersionError('Paikallinen lähde muuttui kopioinnin aikana. Tallenna tiedostot ja yritä uudelleen.')
+                target = core / record['path']
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(data)
+            after = self.inspect_local(root, publish=False)
+            if after != selected:
+                raise VersionError('Paikallinen lähde muuttui kopioinnin aikana. Tallenna tiedostot ja yritä uudelleen.')
+            manifest = dict(selected, manifest_version=1, files=files)
+            manifest_path = core / SNAPSHOT_NAME
+            json_write(manifest_path, manifest)
+            verify_snapshot(core, manifest_path)
+            return selected, manifest_path
+        except BaseException:
+            shutil.rmtree(core)
+            raise
+
+    def extract_bundle(self, bundle: Path, source: Path):
+        self.bundle_inventory(bundle)
+        with zipfile.ZipFile(bundle) as archive:
+            archive.extractall(source)
+
+    def bundle_inventory(self, bundle):
+        files, names = [], set()
+        with zipfile.ZipFile(bundle) as archive:
+            if sum(m.file_size for m in archive.infolist()) > SNAPSHOT_LIMIT:
+                raise VersionError('Simulaattorin lähdepaketti ylittää kokorajan.')
+            for member in archive.infolist():
+                parts = member.filename.rstrip('/').split('/')
+                if (member.filename in names or any(p in ('', '.', '..') for p in parts) or
+                    any(c in member.filename for c in ('\\', ';', ':', '\n', '\r')) or
+                    member.file_size > 32 * 1024 * 1024 or stat.S_ISLNK(member.external_attr >> 16)):
+                    raise VersionError('Simulaattorin lähdepaketissa on virheellinen polku tai tiedostokoko.')
+                names.add(member.filename)
+                if not member.is_dir():
+                    files.append({'path': member.filename, 'sha256': hashlib.sha256(archive.read(member)).hexdigest()})
+        return sorted(files, key=lambda f: f['path'])
+
+    def prepare_local_cache(self, bundle, snapshot, selected, profile, cmake_options):
+        """Reuse only a verified simulator/source/profile combination, never the user tree."""
+        identity = {'local_path': selected['local_path'], 'profile': profile,
+                    # ZIP directory timestamps change on rebuild; key the exact source contents.
+                    'bundle_fingerprint': source_fingerprint(self.bundle_inventory(bundle)),
+                    'platform': platform.system() + '-' + platform.machine(),
+                    'cmake_options': list(cmake_options)}
+        key = hashlib.sha256(json.dumps(identity, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+        cache = self.home / 'local-cache' / key
+        core, source = cache/'core', cache/'source'
+        if cache.exists():
+            if cache.is_symlink() or json.loads((cache/'identity.json').read_text()) != identity:
+                raise VersionError('Paikallisen rakennuksen välimuistin alkuperätiedot muuttuivat.')
+            previous = verify_snapshot(core, core/SNAPSHOT_NAME)
+            previous_files = {f['path']: f for f in previous['files']}
+        else:
+            cache.mkdir(parents=True)
+            self.extract_bundle(bundle, source)
+            json_write(cache/'identity.json', identity)
+            core.mkdir()
+            previous_files = {}
+        manifest = verify_snapshot(snapshot, snapshot/SNAPSHOT_NAME)
+        current_files = {f['path']: f for f in manifest['files']}
+        for relative in previous_files.keys() - current_files.keys():
+            (core/relative).unlink()
+        for relative, record in current_files.items():
+            if previous_files.get(relative) == record:
+                continue  # Preserve mtime so CMake rebuilds only changed compilation units.
+            target = core/relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(checked_read(snapshot, relative))
+        json_write(core/SNAPSHOT_NAME, manifest)
+        verify_snapshot(core, core/SNAPSHOT_NAME)
+        self.verify_cached_bundle(bundle, source)
+        return core, source
+
+    def verify_cached_bundle(self, bundle, source):
+        # Generated build/ contents are not simulator sources. Bundle members must remain exact.
+        if source.is_symlink() or source.parent.is_symlink():
+            raise VersionError('Simulaattorin lähdevälimuisti sisältää virheellisen polun.')
+        expected = self.bundle_inventory(bundle)
+        actual = []
+        def visit(directory):
+            for path in sorted(directory.iterdir()):
+                relative = path.relative_to(source).as_posix()
+                if relative == 'simulator/build':
+                    continue
+                if path.is_symlink():
+                    raise VersionError('Simulaattorin lähdevälimuisti sisältää virheellisen polun.')
+                if path.is_dir():
+                    visit(path)
+                else:
+                    actual.append({'path': relative, 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()})
+        visit(source)
+        if sorted(actual, key=lambda f: f['path']) != expected:
+            raise VersionError('Simulaattorin lähdevälimuisti muuttui. Rakennus estetty.')
+
+    def build(self, ref, bundle: Path, cmake_options=(), local: Path | None = None, profile='480x320'):
+        if profile not in ('320x170', '480x320'):
+            raise VersionError('Tuntematon näyttöprofiili.')
+        if local is not None and ref is not None:
+            raise VersionError('Valitse Git-versio tai paikallinen lähde, ei molempia.')
         missing = self.requirements(bundle)
         if missing:
             raise VersionError('Rakennuksesta puuttuu: ' + missing)
-        cache = self.fetch()
-        selected = self.resolve(cache, ref)
-        sha = selected['sha']
         artifact = uuid.uuid4().hex
         root = self.home / 'builds' / artifact
         root.mkdir(parents=True)
-        self.publish('downloading', 'Ladataan lukitun version lähdekoodia', artifact=artifact, **selected)
         core = root / 'core'
-        self.git('clone', '--no-local', '--no-hardlinks', '--no-checkout', '--', cache, core)
-        self.git('checkout', '--detach', sha, cwd=core)
-        self.verify_checkout(core, sha)
-        self.check_cancel()
+        manifest_path = None
+        if local is not None:
+            self.publish('downloading', 'Otetaan paikallisista lähteistä muuttumaton tilannekuva', artifact=artifact, profile=profile)
+            selected, manifest_path = self.capture_local(local, core)
+            self.publish('downloading', 'Paikallinen lähdetilannekuva lukittu', **selected)
+        else:
+            cache = self.fetch()
+            selected = self.resolve(cache, ref or 'main')
+            self.publish('downloading', 'Ladataan lukitun version lähdekoodia', artifact=artifact, profile=profile, source_kind='github', **selected)
+            self.git('clone', '--no-local', '--no-hardlinks', '--no-checkout', '--', cache, core)
+            self.git('checkout', '--detach', selected['sha'], cwd=core)
+        sha = selected['sha']
+        original_snapshot = core if manifest_path else None
         source = root / 'source'
-        with zipfile.ZipFile(bundle) as archive:
-            for member in archive.infolist():
-                target = (source / member.filename).resolve()
-                if not target.is_relative_to(source.resolve()) or member.file_size > 32 * 1024 * 1024:
-                    raise VersionError('Simulaattorin lähdepaketissa on virheellinen polku tai tiedostokoko.')
-            if sum(m.file_size for m in archive.infolist()) > 128 * 1024 * 1024:
-                raise VersionError('Simulaattorin lähdepaketti ylittää kokorajan.')
-            archive.extractall(source)
+        if manifest_path:
+            core, source = self.prepare_local_cache(bundle, original_snapshot, selected, profile, cmake_options)
+            manifest_path = core/SNAPSHOT_NAME
+        else:
+            self.extract_bundle(bundle, source)
+        def verify():
+            if manifest_path:
+                original = verify_snapshot(original_snapshot, original_snapshot/SNAPSHOT_NAME)
+                verified = verify_snapshot(core, manifest_path)
+                if any({k: record.get(k) for k in selected} != selected for record in (original, verified)):
+                    raise VersionError('Paikallisen tilannekuvan alkuperätiedot muuttuivat. Rakennus estetty.')
+                self.verify_cached_bundle(bundle, source)
+            else:
+                self.verify_checkout(core, sha)
+        verify()
+        self.check_cancel()
         preset = 'windows-release' if os.name == 'nt' else 'linux-release'
         simulator = source / 'simulator'
         build = simulator / 'build' / preset
         self.publish('configuring', 'Valmistellaan erillistä rakennusta')
-        self.run(['cmake', '--preset', preset, f'-DASKOMPU_CORE_ROOT={core}', f'-DASKOMPU_CORE_REVISION={sha}', *cmake_options], cwd=simulator)
-        self.verify_checkout(core, sha)
+        configure = ['cmake', '--preset', preset, f'-DASKOMPU_CORE_ROOT={core}', f'-DASKOMPU_CORE_REVISION={sha}', f'-DASKOMPU_DISPLAY_PROFILE={profile}']
+        if manifest_path:
+            configure.append(f'-DASKOMPU_CORE_SNAPSHOT={manifest_path}')
+        self.run([*configure, *cmake_options], cwd=simulator)
+        verify()
         self.publish('building', 'Käännetään simulaattoria valitulla ASkompu-ytimellä')
         self.run(['cmake', '--build', '--preset', preset], cwd=simulator)
+        verify()
         self.publish('testing', 'Suoritetaan kaikki moottori-, ohjain- ja tuotantotestit')
         self.run(['ctest', '--preset', preset], cwd=simulator)
-        self.verify_checkout(core, sha)
+        verify()
         stage = root / 'app'
         self.run(['cmake', '--install', build, '--config', 'Release', '--component', 'Runtime', '--prefix', stage], cwd=simulator)
+        verify()
         exe = stage / ('askompu-simulaattori.exe' if os.name == 'nt' else 'bin/askompu-simulaattori')
         environment = dict(os.environ, SDL_VIDEODRIVER='dummy')
         version = self.run([exe, '--versio'], cwd=root, env=environment, timeout=30)
-        if f'ASkompu-ydin: {sha}' not in version or 'Ytimen työpuu: puhdas' not in version:
+        expected_worktree = ('paikallisia muutoksia' if selected.get('dirty') else 'puhdas') if selected.get('git', 1) else 'ei Git-tietoja'
+        expected = [f'ASkompu-ydin: {sha}', f'Ytimen työpuu: {expected_worktree}']
+        if manifest_path:
+            expected += ['Ytimen lähde: local', f'Paikallinen lähde: {selected["local_path"]}', f'ASkompu-lähteiden SHA-256: {selected["fingerprint"]}']
+        if any(line not in version.splitlines() for line in expected):
             raise VersionError('Valmis ohjelma raportoi väärän ytimen. Uudelleenkäynnistys estetty.')
         self.run([exe, '--tarkista'], cwd=root, env=environment, timeout=120)
         self.check_cancel()
-        ready = dict(selected, artifact=artifact, executable=str(exe), binary_sha256=hashlib.sha256(exe.read_bytes()).hexdigest(), tested=True)
+        verify()
+        ready = dict(selected, profile=profile, source_kind='local' if local else 'github', artifact=artifact, executable=str(exe), binary_sha256=hashlib.sha256(exe.read_bytes()).hexdigest(), tested=True)
         json_write(root / 'ready.json', ready)
         json_write(self.home / 'latest-ready.json', ready)
         self.publish('ready', 'ASkompu-ydin valmis', executable=str(exe), **selected)
@@ -406,22 +707,31 @@ class Backend:
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('operation', choices=['doctor', 'list', 'resolve', 'build', 'launch', 'rollback'])
+    parser.add_argument('operation', choices=['doctor', 'list', 'resolve', 'inspect-local', 'build', 'launch', 'rollback'])
     parser.add_argument('--home', type=Path, required=True, help='Erillinen hallittu työtila')
     parser.add_argument('--job', type=Path, help='Tilaviestien ja lokien hakemisto')
     parser.add_argument('--upstream', default=UPSTREAM, help='Git-repo; paikallinen repo sopii testeihin')
-    parser.add_argument('--ref', default='main', help='main, refs/tags/TAGI tai täysi SHA')
+    source = parser.add_mutually_exclusive_group()
+    source.add_argument('--ref', help='main, refs/tags/TAGI tai täysi SHA (oletus main)')
+    source.add_argument('--local', type=Path, help='Paikallinen ASkompu-lähde; myös tallennetut committoimattomat muutokset')
+    parser.add_argument('--profile', choices=['320x170', '480x320'], default='480x320', help='Rakennettavan simulaattorin natiivi näyttöprofiili')
     parser.add_argument('--bundle', type=Path, default=Path(__file__).resolve().parents[1] / 'simulator-source.zip')
     parser.add_argument('--artifact')
     parser.add_argument('--current', type=Path)
     parser.add_argument('--cmake-option', action='append', default=[], help='Kehittäjän CMake-lisävalinta; ei saa ohittaa ytimen lukitusta')
     args = parser.parse_args(argv)
+    if args.local:
+        local_root = args.local.expanduser().resolve()
+        if args.home.resolve().is_relative_to(local_root) or (args.job and args.job.resolve().is_relative_to(local_root)):
+            parser.error('--home ja --job eivät saa sijaita paikallisen ASkompu-lähteen sisällä')
     backend = Backend(args.home, args.job or args.home / 'jobs' / uuid.uuid4().hex, args.upstream)
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, lambda *_: setattr(backend, 'cancelled', True))
     try:
         backend.publish('starting', 'Valmistellaan toimintoa', operation=args.operation)
         with workspace_lock(backend.home):
+            if args.local and args.operation not in ('inspect-local', 'build'):
+                raise VersionError('--local on käytössä vain inspect-local- ja build-toiminnoissa.')
             if args.operation == 'doctor':
                 missing = backend.requirements(args.bundle)
                 previous = ''
@@ -435,18 +745,25 @@ def main(argv=None):
                     ready_info = json.loads((backend.home / 'latest-ready.json').read_text(encoding='utf-8'))
                 backend.publish('done', 'Rakennustyökalut löytyivät' if not missing else 'Puuttuvat työkalut: ' + missing,
                                 requirements_ok=int(not missing), previous=previous, artifact=latest,
-                                ready_sha=ready_info.get('sha', ''), ready_tag=ready_info.get('tag', ''))
+                                ready_sha=ready_info.get('sha', ''), ready_tag=ready_info.get('tag', ''),
+                                ready_source_kind=ready_info.get('source_kind', ''), ready_local_path=ready_info.get('local_path', ''),
+                                ready_fingerprint=ready_info.get('fingerprint', ''), ready_dirty=ready_info.get('dirty', 0))
             elif args.operation == 'list':
                 backend.versions()
             elif args.operation == 'resolve':
-                if not SHA.fullmatch(args.ref) and args.ref != 'main' and not args.ref.startswith('refs/tags/'):
+                ref = args.ref if args.ref is not None else 'main'
+                if not SHA.fullmatch(ref) and ref != 'main' and not ref.startswith('refs/tags/'):
                     raise VersionError('Anna main, refs/tags/TAGI tai täysi 40-merkkinen commit-SHA.')
-                selected = backend.resolve(backend.fetch(), args.ref)
+                selected = backend.resolve(backend.fetch(), ref)
                 backend.publish('done', 'Versio lukittu täyteen commit-SHA:han', **selected)
+            elif args.operation == 'inspect-local':
+                if not args.local:
+                    raise VersionError('Paikallisen ASkompu-lähteen polku puuttuu (--local).')
+                backend.inspect_local(args.local)
             elif args.operation == 'build':
                 if any(not option.startswith('-DFETCHCONTENT_SOURCE_DIR_') for option in args.cmake_option):
                     raise VersionError('Lisävalinnoilla saa antaa vain lukittujen riippuvuuksien lähdehakemistoja.')
-                backend.build(args.ref, args.bundle, args.cmake_option)
+                backend.build(args.ref, args.bundle, args.cmake_option, args.local, args.profile)
             else:
                 if not args.current:
                     raise VersionError('Nykyisen ohjelman polku puuttuu.')

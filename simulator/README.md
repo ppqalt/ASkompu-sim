@@ -47,9 +47,33 @@ Packages appear under build/PRESET/packages. Windows bundles static SDL
 and MSVC runtime libraries; packaging rejects unexpected DLL dependencies.
 Linux packages use system C/C++ libraries and are not distribution-independent.
 
+## Try a local ASkompu version
+
+Open **ASkompu-versio → Paikallinen kansio**, choose the project root and
+press **Tarkista kansio**. Select 320×170 or 480×320, then **Rakenna ja testaa**.
+When the checks pass, **Avaa rakennettu versio** starts the new session.
+Saved uncommitted edits and new source files are included; the original
+directory is never edited. Unsaved editor buffers are not included.
+
+Each build locks a fingerprinted source snapshot. Repeated local builds reuse
+the compiler cache for the same source directory, display profile and simulator
+sources, while still running the tests and installed-program checks. Restart
+begins a fresh session. The first build can download pinned dependencies.
+
+The simulator uses **REAL** when the selected ASkompu sources provide the shared
+renderer and host surface. The original display is retained as **Esikatselu**
+for older compatible cores: their real application logic runs, but the display
+is the simulator's independent preview. This is the temporary LEGACY fallback,
+not a claim of exact firmware graphics. No modern firmware graphics are bundled
+in this branch. REAL is the future production path.
+
+REAL draws a native RGB565 framebuffer at both supported display sizes.
+**Nearest / Linear** affect only desktop texture filtering. New visuals come
+from the selected ASkompu tree, never a second simulator styling implementation.
+
 ## Optional GitHub core selection
 
-**Ytimen versio** fetches main, tags and recent commits from Mikky100/ASkompu.
+**ASkompu-versio → GitHub** fetches main, tags and recent commits from Mikky100/ASkompu.
 Select a version or open **Tarkka commit** for a full SHA. The backend locks the
 commit, checks out clean sources, builds in a separate workspace, runs tests
 and checks the installed binary before offering restart. A readiness handshake
@@ -73,6 +97,7 @@ Windows build, dependency auditing and manual checks:
 
 The core-selector check uses --tarkista-ytimenvalitsin, an isolated
 --core-home and optionally --core-upstream pointing to a local Git fixture.
+Add **--local-core PATH** to check the local-source page and folder picker.
 Omit the dummy driver for a visible desktop test. The optional
 --testaa-ytimen-rakennus adds a real build, cancellation and restart; it leaves
 the successfully launched program open.

@@ -1,8 +1,11 @@
 #include "DeviceDisplay.h"
+#include "DisplayModelRenderState.h"
+#include "SharedDisplayFramebuffer.h"
 
 #include <algorithm>
 #include <cfloat>
 #include <cstdio>
+#include <stdexcept>
 #include <string>
 #include "Finnish.h"
 #include "DisplayFormatting.h"
@@ -127,7 +130,7 @@ void order(Canvas& c,const core::OrderDisplayModel& m) {
 }
 }  // namespace
 
-void drawDeviceDisplay(const core::DisplayModel& m,ImVec2 origin,ImVec2 size,ImFont* font) {
+void drawLegacyDeviceDisplay(const core::DisplayModel& m,ImVec2 origin,ImVec2 size,ImFont* font) {
   const float brightness=0.4f+0.6f*m.backlightPercent/100.0f;
   ImVec4 color=m.textColor==domain::TextColor::RED?ImVec4(1,.22f,.22f,1):
     m.textColor==domain::TextColor::GREEN?ImVec4(.18f,1,.32f,1):ImVec4(.95f,.97f,.96f,1);
@@ -213,5 +216,108 @@ void drawDeviceDisplay(const core::DisplayModel& m,ImVec2 origin,ImVec2 size,ImF
     }
   }
   c.draw->PopClipRect();
+}
+
+DeviceDisplay::~DeviceDisplay() {
+  if (texture_) SDL_DestroyTexture(texture_);
+}
+
+void DeviceDisplay::setScaling(DisplayScaling scaling) {
+  if (scaling_ == scaling) return;
+  scaling_ = scaling;
+  if (texture_ && SDL_SetTextureScaleMode(
+          texture_, scaling_ == DisplayScaling::Nearest
+                        ? SDL_ScaleModeNearest : SDL_ScaleModeLinear) != 0)
+    throw std::runtime_error(std::string("Display scaling: ") + SDL_GetError());
+}
+
+void DeviceDisplay::updateSharedTexture(const core::DisplayModel& model,
+                                       uint16_t nativeWidth,
+                                       uint16_t nativeHeight) {
+  if (texture_ && hasCachedModel_ && textureWidth_ == nativeWidth &&
+      textureHeight_ == nativeHeight &&
+      sameRenderedDisplayState(cachedModel_, model))
+    return;
+
+  const auto framebuffer = renderSharedDisplay(model, nativeWidth, nativeHeight);
+  if (framebuffer.width != nativeWidth || framebuffer.height != nativeHeight ||
+      framebuffer.pixels.size() != static_cast<size_t>(nativeWidth) * nativeHeight)
+    throw std::runtime_error("Shared renderer returned an invalid framebuffer");
+  if (!texture_ || textureWidth_ != nativeWidth || textureHeight_ != nativeHeight) {
+    if (texture_) SDL_DestroyTexture(texture_);
+    texture_ = SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_RGBA32,
+        SDL_TEXTUREACCESS_STATIC, nativeWidth, nativeHeight);
+    hasCachedModel_ = false;
+    if (!texture_)
+      throw std::runtime_error(std::string("Shared framebuffer texture: ") + SDL_GetError());
+    if (SDL_SetTextureScaleMode(texture_, scaling_ == DisplayScaling::Nearest
+            ? SDL_ScaleModeNearest : SDL_ScaleModeLinear) != 0)
+      throw std::runtime_error(std::string("Display scaling: ") + SDL_GetError());
+    textureWidth_ = nativeWidth;
+    textureHeight_ = nativeHeight;
+  }
+
+  rgbaPixels_.resize(framebuffer.pixels.size() * 4);
+  for (size_t index = 0; index < framebuffer.pixels.size(); ++index) {
+    uint16_t pixel = framebuffer.pixels[index];
+    if (framebuffer.panelInverted) pixel ^= 0xFFFF;
+    const uint8_t red = static_cast<uint8_t>((pixel >> 11) & 0x1F);
+    const uint8_t green = static_cast<uint8_t>((pixel >> 5) & 0x3F);
+    const uint8_t blue = static_cast<uint8_t>(pixel & 0x1F);
+    rgbaPixels_[index * 4] = static_cast<uint8_t>((red << 3) | (red >> 2));
+    rgbaPixels_[index * 4 + 1] = static_cast<uint8_t>((green << 2) | (green >> 4));
+    rgbaPixels_[index * 4 + 2] = static_cast<uint8_t>((blue << 3) | (blue >> 2));
+    rgbaPixels_[index * 4 + 3] = 255;
+  }
+  if (SDL_UpdateTexture(texture_, nullptr, rgbaPixels_.data(), nativeWidth * 4) != 0)
+    throw std::runtime_error(std::string("Shared framebuffer upload: ") + SDL_GetError());
+
+  cachedModel_ = model;
+  // Menu labels may come from mutable storage in a local development core.
+  // Own the cached text so edits through the same pointer invalidate pixels.
+  cachedMenuTitle_ = model.menu.title ? model.menu.title : "";
+  cachedModel_.menu.title = model.menu.title ? cachedMenuTitle_.c_str() : nullptr;
+  for (size_t row = 0; row < core::MENU_VISIBLE_ROWS; ++row) {
+    cachedMenuLabels_[row] = model.menu.rows[row].label ? model.menu.rows[row].label : "";
+    cachedModel_.menu.rows[row].label = model.menu.rows[row].label
+        ? cachedMenuLabels_[row].c_str() : nullptr;
+  }
+  hasCachedModel_ = true;
+}
+
+DeviceRendererMode DeviceDisplay::draw(const core::DisplayModel& model,
+                                      ImVec2 origin, ImVec2 size,
+                                      ImFont* font, uint16_t nativeWidth,
+                                      uint16_t nativeHeight) {
+  if (sharedDisplayRendererSupports(model.screen)) {
+    updateSharedTexture(model, nativeWidth, nativeHeight);
+    const auto brightness = static_cast<uint8_t>(
+        102 + 153 * std::min<unsigned>(model.backlightPercent, 100) / 100);
+    // Filtering affects presentation only. The selected renderer always draws
+    // one unchanged native-resolution RGB565 framebuffer.
+    ImGui::GetWindowDrawList()->AddImage(
+        static_cast<ImTextureID>(reinterpret_cast<intptr_t>(texture_)), origin,
+        {origin.x + size.x, origin.y + size.y}, {0, 0}, {1, 1},
+        IM_COL32(brightness, brightness, brightness, 255));
+    return DeviceRendererMode::Shared;
+  }
+
+  // Preserve the original simulator's 480x320 geometry in old-core fallback.
+  constexpr float aspect = 480.f / 320.f;
+  ImVec2 legacySize = size;
+  ImVec2 legacyOrigin = origin;
+  if (size.x / size.y > aspect) {
+    legacySize.x = size.y * aspect;
+    legacyOrigin.x += (size.x - legacySize.x) / 2;
+  } else {
+    legacySize.y = size.x / aspect;
+    legacyOrigin.y += (size.y - legacySize.y) / 2;
+  }
+  drawLegacyDeviceDisplay(model, legacyOrigin, legacySize, font);
+  return DeviceRendererMode::Legacy;
+}
+
+const char* rendererModeName(DeviceRendererMode mode) {
+  return mode == DeviceRendererMode::Shared ? "ASkompun oma näyttö" : "Simulaattorin näyttö";
 }
 }  // namespace simulator::desktop

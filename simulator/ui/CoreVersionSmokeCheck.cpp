@@ -22,16 +22,22 @@ void CoreVersionSmokeCheck::beforeFrame(SimulatorView& view,SDL_Window* window){
   if(++settle_<5)return;
   if(settle_==5)std::cout<<"Ytimen GUI-tarkistus: vaihe "<<step_<<std::endl;
   switch(step_){
-    case 0:if(click(view,"Ytimen versio"))advance();break;
+    case 0:if(click(view,"ASkompu-versio"))advance();break;
     case 1:if(view.corePhase()=="done"){capture_="ytimen-tyhja.bmp";advance();}else if(view.corePhase()=="failed")throw std::runtime_error("Versionvalitsimen työkalutarkistus epäonnistui");break;
     case 2:
+      if(local_){if(!view.localSourceReady())throw std::runtime_error("Paikallista ASkompu-kansiota ei tarkistettu");step_=30;clickPhase_=settle_=0;break;}
       if(!view.hitRegions().count("Myöhemmin")||click(view,"Myöhemmin"))advance();
       break;
     case 3:
       if(!view.hitRegions().count("Näytä rakennus")||click(view,"Näytä rakennus")){capture_="ytimen-aloitustila.bmp";advance();}
       break;
-    case 4:if(click(view,"Päivitä versiolista"))advance();break;
-    case 5:if(view.corePhase()=="done"){capture_="ytimen-versiot.bmp";advance();}else if(view.corePhase()=="failed")throw std::runtime_error("Versionvalitsimen versiolistan haku epäonnistui");break;
+    case 4:
+      if(!view.hitRegions().count("Päivitä versiolista")){if(click(view,"GitHub")){clickPhase_=settle_=0;}}
+      else if(click(view,"Päivitä versiolista")){
+        if(view.coreOperation()=="list")advance();else{clickPhase_=settle_=0;}
+      }
+      break;
+    case 5:if(view.coreOperation()=="list"&&view.corePhase()=="done"){capture_="ytimen-versiot.bmp";advance();}else if(view.corePhase()=="failed")throw std::runtime_error("Versionvalitsimen versiolistan haku epäonnistui");break;
     case 6:SDL_SetWindowSize(window,780,660);advance();break;
     case 7:capture_="ytimen-versiot-pieni.bmp";advance();break;
     case 8:
@@ -45,15 +51,33 @@ void CoreVersionSmokeCheck::beforeFrame(SimulatorView& view,SDL_Window* window){
     case 11:
       if(!build_){finished_=true;std::cout<<"Hyväksytty: ytimen versionvalitsin, versiolista, pieni ikkuna ja virhetila\n";}
       else{SDL_SetWindowSize(window,1380,960);advance();}break;
-    case 12:if(click(view,"Rakenna valittu ydin"))advance();break;
+    case 12:if(click(view,"Rakenna ja testaa"))advance();break;
     case 13:if(view.corePhase()=="building"){capture_="ytimen-rakennus.bmp";advance();}else if(view.corePhase()=="failed")throw std::runtime_error("Valitsimen oikea rakennus epäonnistui ennen peruutustestiä");break;
     case 14:if(click(view,"Peruuta toiminto"))advance();break;
     case 15:if(view.corePhase()=="cancelled")advance();break;
-    case 16:if(click(view,"Rakenna valittu ydin"))advance();break;
+    case 16:if(click(view,"Rakenna ja testaa"))advance();break;
     case 17:if(view.corePhase()=="ready"){capture_="ytimen-rakennus-valmis.bmp";advance();}else if(view.corePhase()=="failed")throw std::runtime_error("Valitsimen oikea rakennus tai testit epäonnistuivat");break;
-    case 18:if(click(view,"Käynnistä uudelleen"))advance();break;
+    case 18:if(click(view,"Avaa rakennettu versio"))advance();break;
     case 19:if(click(view,"Aloita uusi sessio"))advance();break;
-    case 20:if(view.restartCompleted()){finished_=true;std::cout<<"Hyväksytty: ytimen GUI-rakennus, peruutus, testit ja oikea uudelleenkäynnistys\n";}else if(view.corePhase()=="failed")throw std::runtime_error("Uuden simulaattorin käynnistys epäonnistui");break;
+    case 20:if(view.restartCompleted()){finished_=true;std::cout<<(local_?"Hyväksytty: paikallinen GUI-rakennus, testit ja oikea uudelleenkäynnistys\n":"Hyväksytty: ytimen GUI-rakennus, peruutus, testit ja oikea uudelleenkäynnistys\n");}else if(view.corePhase()=="failed")throw std::runtime_error("Uuden simulaattorin käynnistys epäonnistui");break;
+    case 30:capture_="paikallinen-kansio.bmp";advance();break;
+    case 31:if(click(view,"Valitse kansio…"))advance();break;
+    case 32:capture_="paikallinen-kansiovalitsin.bmp";advance();break;
+    case 33:if(click(view,"Käytä tätä kansiota"))advance();break;
+    case 34:
+      if(view.corePhase()=="done"&&view.localSourceReady()){SDL_SetWindowSize(window,780,660);advance();}
+      else if(view.corePhase()=="failed")throw std::runtime_error("Kansiovalitsimen lähde ei läpäissyt tarkistusta");
+      break;
+    case 35:capture_="paikallinen-pieni.bmp";advance();break;
+    case 36:
+      if(!build_){finished_=true;std::cout<<"Hyväksytty: paikallinen ASkompu, kansiovalitsin ja pieni ikkuna\n";}
+      else{SDL_SetWindowSize(window,1380,960);advance();}
+      break;
+    case 37:if(click(view,"Rakenna ja testaa"))advance();break;
+    case 38:
+      if(view.corePhase()=="ready"){capture_="paikallinen-valmis.bmp";step_=18;clickPhase_=settle_=0;}
+      else if(view.corePhase()=="failed")throw std::runtime_error("Paikallinen rakennus tai sen testit epäonnistuivat");
+      break;
   }
 }
 void CoreVersionSmokeCheck::afterRender(SDL_Renderer* renderer){

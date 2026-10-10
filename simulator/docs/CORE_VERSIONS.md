@@ -1,6 +1,6 @@
 # ASkompu Core / Ytimen versio — simulaattori 1.0.0
 
-Valitsin löytyy yläpalkin **Ytimen versio** -painikkeesta. Se keskeyttää
+Valitsin löytyy yläpalkin **ASkompu-versio** -painikkeesta. Se keskeyttää
 nykyisen simulaatioajon; voit palata Simulaattori-painikkeella ja jatkaa sitä.
 Käytössä oleva ASkompu-ydin ja simulaattorin oma versio näytetään erikseen.
 Täyden SHA:n voi kopioida napsauttamalla sitä. Paikallisesti muutettu
@@ -8,18 +8,18 @@ lähdetyöpuu merkitään näkyvästi, eikä pelkkää HEADia väitetä puhtaaks
 
 ## Mikky100:n käyttöpolku
 
-1. Avaa **Ytimen versio** ja tarkista rakennustyökalujen tila.
+1. Avaa **ASkompu-versio** ja tarkista rakennustyökalujen tila.
 2. Paina **Päivitä versiolista**. Lähde on `Mikky100/ASkompu` GitHubissa.
 3. Valitse **main**, tagi tai commit. Voit suodattaa listaa tai kirjoittaa
    täyden 40-merkkisen SHA:n ja painaa **Ratkaise SHA**. Lista sisältää mainin,
    enintään 100 tagia ja mainin 60 viimeisintä committia. Kaikki versiot eivät
    ole numeroituja julkaisuja. Valinnan tiedoista näkee täyden SHA:n ja viestin.
-4. Paina **Rakenna valittu ydin**. Valittu SHA pysyy lukittuna, vaikka
+4. Paina **Rakenna ja testaa**. Valittu SHA pysyy lukittuna, vaikka
    upstream/main muuttuisi sillä välin. Vaiheet ja kulunut aika näkyvät
    näkymän yläosassa. **Tekninen loki** näyttää työkalujen todelliset tulosteet.
 5. **Peruuta toiminto** pysäyttää myös rakennuksen lapsiprosessit. Nykyinen
    ohjelma säilyy. Vain yksi backend-operaatio voi käyttää samaa työtilaa.
-6. Kun näet **ASkompu-ydin valmis**, valitse **Käynnistä uudelleen** tai
+6. Kun näet **ASkompu-ydin valmis**, valitse **Avaa rakennettu versio** tai
    **Myöhemmin**. Uudelleenkäynnistys pyytää vahvistuksen, koska muistissa olevaa
    ajoa ei siirretä. Uusi sessio alkaa kellon alustuksesta.
 7. Uuden version näkymästä pääsee **Palaa edelliseen ohjelmaan** -painikkeella
@@ -58,6 +58,8 @@ Oletuksena se on edelleen simulaattoriforkin juuri. Erillinen lähdepuu vaatii
 `ASKOMPU_CORE_REVISION`-valinnassa täyden SHA:n, puhtaan Git-checkoutin ja
 juurihakemiston täsmällisen vastaavuuden. Tarkistus suoritetaan määrityksessä
 ja jokaisessa metadatan rakennuksessa. Väärä SHA tai muutettu puu hylätään.
+Paikallisen kansion valinta käyttää jäljempänä kuvattua manifestiin lukittua
+tilannekuvaa, joten myös committoimattomat muutokset voidaan rakentaa turvallisesti.
 
 Kaikki core-, domain-, route-, input- ja tuotannon näyttöapulähteet sekä
 alkuperäiset viisi host-testisarjaa tulevat valitusta puusta. Simulaattori ei
@@ -79,11 +81,13 @@ SOURCE-ORIGIN.txt:ssä myös silloin, kun sen mukana ei ole .git-hakemistoa.
 ## Työtila ja restart
 
 GUI käyttää SDL:n käyttäjäkohtaista asetushakemistoa `ASkompu/Simulator` ja
-sen `core-versions`-alihakemistoa. Polun voi antaa kehittäjän
+sen `local-core-workflow`-alihakemistoa. Polun voi antaa kehittäjän
 `--core-home POLKU` -valitsimella. Työtilassa ovat Git-välimuisti,
 operaatiokohtaiset lokit, erilliset rakennukset ja käynnistyshistoria.
-Jokainen rakennus saa uuden tunnisteen sekä oman `core`, `source` ja `app`
--hakemistonsa. Vanha CMakeCache ei voi valita väärää ydintä.
+Jokainen rakennus saa uuden tunnisteen sekä oman `core`-tilannekuvan ja
+`app`-hakemistonsa. GitHub-rakennuksella on myös oma `source`-hakemisto;
+paikallinen rakennus käyttää alla kuvattua lähde- ja käännösvälimuistia.
+Välimuistin alkuperä ja sisällöt tarkistetaan ennen uudelleenkäyttöä.
 
 Pakettiin sisältyy `simulator-source.zip` sekä `tools/core_versions.py`.
 Lähdepaketti sisältää simulaattorin, esityssovittimen, testit ja lisenssin;
@@ -103,6 +107,72 @@ jälkeen GUI sulkee vanhan ikkunan. Puuttuva kuittaus, prosessin virhe tai
 muuttunut EXE estää vaihdon. Edellisen ohjelman polku säilyy history.json:ssa.
 CLI-käynnistys raportoi onnistumisen, mutta ei sulje käyttäjän muita ikkunoita.
 
+## Paikallisen ASkompun kehittäminen
+
+Valitse **Paikallinen kansio**, anna ASkompu-projektin juurihakemisto ja paina
+**Tarkista kansio**. Kansiossa pitää olla tuotantokoodi (`src` ja `include`)
+sekä ASkompun nykyiset host-testit (`test`). Valitse 320×170 tai 480×320 ja
+paina **Rakenna ja testaa**. Kun rakennus on hyväksytty, vaihda siihen
+**Avaa rakennettu versio** -painikkeella. Tallennetut, committoimattomat ja
+versionhallintaan vielä lisäämättömät lähdetiedostot tulevat mukaan.
+
+Git-committia tai pushia ei tarvita tähän kehityskierrokseen. Muokkaa ja
+tallenna lähteet, paina uudelleen **Rakenna ja testaa** ja käynnistä valmis
+versio. Muistissa olevaa simulaatioajoa ei siirretä uuteen prosessiin.
+Kansion tarkistus varmistaa lähderakenteen; todellinen API-yhteensopivuus
+varmistuu vasta käännöksessä ja testeissä.
+
+Backend lukee lähteet eikä muuta lähdekansiota, sen Git-indeksiä tai haaraa.
+Jokaiselle rakennukselle otetaan täsmällinen tilannekuva hakemistoista `src`,
+`include` ja `test` sekä olemassa olevista `LICENSE`, `LICENSE.txt`, `COPYING`
+ja `platformio.ini` -tiedostoista. `.git`, `.pio`, `simulator`, `build`,
+Python-välimuistit ja tavalliset käännöstuotteet jätetään pois. Symbolisia
+linkkejä lähdepuussa ei hyväksytä. Rakennuksen työtilan pitää olla
+lähdekansion ulkopuolella.
+
+Lähdetiedostojen sisältö, tiedostoluettelo ja Git-tiedot luetaan ennen ja
+jälkeen kopioinnin. Jos ne muuttuvat kopioinnin aikana, toiminto keskeytyy
+ja sitä voi yrittää uudelleen tallennuksen jälkeen. Kopioinnin valmistuttua
+lähteitä voi kehittää edelleen: käynnissä oleva rakennus käyttää jo lukittua
+tilannekuvaa. Tämä on tarkistettu kopio, ei käyttöjärjestelmän atominen
+monen tiedoston tilannekuva.
+
+`snapshot-manifest.json` säilyttää alkuperäisen lähdepolun, todellisen Git-HEADin
+(jos hakemisto on Git-repon juuri), commitin päiväyksen/tagit, puhtaustilan,
+jokaisen tiedoston SHA-256:n ja koko tilannekuvan SHA-256:n. Committoimaton
+versio ei saa keksittyä Git-tunnistetta eikä sitä merkitä puhtaaksi commitiksi.
+Myös ilman `.git`-hakemistoa oleva lähde voidaan rakentaa; silloin Git-revisio
+on `tuntematon` ja sisältö yksilöidään SHA-256:lla.
+
+`ASKOMPU_CORE_SNAPSHOT` on paikallisen tilannekuvan erillinen CMake-polku.
+CMake tarkistaa manifestin tiedostoluettelon ja tiivisteet sekä hylkää
+polkupakenemiset, linkit, ylimääräiset tiedostot ja muuttuneet sisällöt.
+GitHub-rakennus ei käytä tätä polkua: sen puhtaan, täyteen 40-merkkiseen
+SHA:han lukitun checkoutin tarkistukset säilyvät ennallaan.
+
+Paikallisen kehityskierroksen nopeuttamiseksi `local-cache` säilyttää erillisen
+kopion ja CMake-rakennushakemiston. Välimuistin avain sisältää alkuperäisen
+lähdepolun, näyttöprofiilin, simulaattorilähdepaketin täsmällisen sisältötiivisteen,
+käyttöjärjestelmän/arkkitehtuurin ja riippuvuuksien mahdolliset lähdepolut.
+Saman avaimen rakennus päivittää vain muuttuneet tiedostot ja poistaa
+poistetut lähteet. Muuttumattomien tiedostojen aikaleimat säilyvät, jotta
+käännös voi olla inkrementaalinen. ZIP-aikaleimat eivät vaihda sisältöavainta.
+Kaikki käännös-, testi-, asennus- ja käynnistystarkistukset suoritetaan
+jokaisella kierroksella. Lähdevälimuistin muutokset hylätään, eikä tulosta
+hyväksytä aiemman testituloksen perusteella.
+
+Hyväksytty ohjelma asennetaan aina omaan rakennuskohtaiseen `app`-hakemistoon,
+ja alkuperäinen tilannekuva säilyy sen rinnalla. Aiempi toimiva ohjelma ja
+rollback-polku säilyvät. `--versio` ja `BUILDINFO.txt` näyttävät paikallisen
+polun, lähdetyypin, HEADin, paikallisten muutosten tilan ja tilannekuvan
+tiivisteen. Paikallisen tilannekuvan tiiviste kattaa myös testit ja mukaan
+otetut lisenssi-/asetustiedostot; Git-rakennuksen vanha lähdetiiviste kattaa
+edelleen `src`- ja `include`-puut.
+
+Paikallisen lähteen tarkistus ei käytä verkkoyhteyttä. Ensimmäinen rakennus
+voi tarvita verkon lukittujen SDL/ImGui/Unity-riippuvuuksien lataamiseen.
+Saman välimuistin seuraavat rakennukset käyttävät jo ladattuja riippuvuuksia.
+
 Vanhoja rakennuksia ei poisteta automaattisesti. Ne ja lokit voivat käyttää
 paljon levytilaa. Sulje ohjelmat ennen käsin tehtävää siivousta ja säilytä
 käytössä oleva sekä palautukseen tarvittava `app`-hakemisto. Alkuperäinen
@@ -120,11 +190,15 @@ python3 simulator/tools/core_versions.py doctor --home /oma/erillinen/tyotila --
 python3 simulator/tools/core_versions.py list --home /oma/erillinen/tyotila
 python3 simulator/tools/core_versions.py resolve --home /oma/erillinen/tyotila --ref refs/tags/v0.1.0
 python3 simulator/tools/core_versions.py build --home /oma/erillinen/tyotila --ref TAYSI_SHA --bundle simulator/build/linux-release/simulator-source.zip
+python3 simulator/tools/core_versions.py inspect-local --home /oma/erillinen/tyotila --local /oma/ASkompu
+python3 simulator/tools/core_versions.py build --home /oma/erillinen/tyotila --local /oma/ASkompu --profile 480x320 --bundle simulator/build/linux-release/simulator-source.zip
 ```
 
 Windowsissa käytä `py -3` ja Windows-polkuja; lähdepaketti on
 `build/windows-release/simulator-source.zip`. `--job` määrää operaation
 lokihakemiston. Luo sinne `cancel`-tiedosto CLI-operaation peruuttamiseksi.
+`--local` ja `--ref` ovat toisensa poissulkevat. `--profile` hyväksyy arvot
+`320x170` ja `480x320` (oletus), myös GitHub-rakennuksessa.
 `launch --artifact TUNNISTE --current NYKYINEN_EXE` ja
 `rollback --current NYKYINEN_EXE` käyttävät samaa käynnistyspolkua kuin GUI.
 

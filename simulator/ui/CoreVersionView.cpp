@@ -3,6 +3,8 @@
 #include <SDL.h>
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <iomanip>
 #include <sstream>
@@ -82,7 +84,7 @@ std::wstring quoted(const std::string& value){
 #endif
 }
 
-CoreVersionView::CoreVersionView(std::string home,std::string upstream):upstream_(std::move(upstream)){
+CoreVersionView::CoreVersionView(std::string home,std::string upstream,std::string local):upstream_(std::move(upstream)){
   char* base=SDL_GetBasePath();fs::path directory=fs::u8path(base?base:"");SDL_free(base);
   // SDL includes a trailing separator; strip it before finding the install prefix.
   if(directory.filename().empty())directory=directory.parent_path();
@@ -93,14 +95,23 @@ CoreVersionView::CoreVersionView(std::string home,std::string upstream):upstream
 #endif
   if(home.empty()){
     char* pref=SDL_GetPrefPath("ASkompu","Simulator");
-    if(pref){home_=fs::u8path(pref)/"core-versions";SDL_free(pref);}
+    if(pref){home_=fs::u8path(pref)/"local-core-workflow";SDL_free(pref);}
   }else home_=fs::u8path(home);
   for(const auto& root:{directory,directory.parent_path(),directory.parent_path()/"share/askompu-simulaattori"}){
     if(fs::is_regular_file(root/"tools/core_versions.py")&&fs::is_regular_file(root/"simulator-source.zip")){
       script_=root/"tools/core_versions.py";bundle_=root/"simulator-source.zip";break;
     }
   }
-  message_="Valitse ASkompu-ydin ja rakenna sille oma simulaattori.";
+  std::ifstream preference(home_/"local-source.txt");
+  std::string remembered;
+  std::getline(preference,remembered);
+  profile_=ASKOMPU_DISPLAY_WIDTH==320?0:1;
+  int rememberedProfile=profile_;
+  if(preference>>rememberedProfile)profile_=rememberedProfile==0?0:1;
+  const std::string localSource=!local.empty()?local:
+      std::string(build::sourceKind)=="local"?build::sourcePath:remembered;
+  if(!localSource.empty())std::snprintf(localPath_,sizeof(localPath_),"%s",localSource.c_str());
+  message_="Valitse paikallinen ASkompu-kansio tai GitHub-versio.";
 }
 CoreVersionView::~CoreVersionView(){
   if(running_)cancel();
@@ -174,7 +185,19 @@ void CoreVersionView::readResult(){
   if(operation_=="doctor"){
     requirements_.clear();for(const auto& row:rows(job_/"requirements.tsv"))if(row.size()==2)requirements_.emplace_back(row[1],row[0]=="1");
     requirementsOk_=state_["requirements_ok"]=="1";previous_=state_["previous"];
-    if(!state_["artifact"].empty()){readyArtifact_=state_["artifact"];readyLabel_=state_["ready_tag"].empty()?brief(state_["ready_sha"]):state_["ready_tag"];}
+    if(!state_["artifact"].empty()){
+      readyArtifact_=state_["artifact"];
+      readyLabel_=state_["ready_source_kind"]=="local"?"Paikallinen ASkompu · "+brief(state_["ready_fingerprint"]):
+          state_["ready_tag"].empty()?brief(state_["ready_sha"]):state_["ready_tag"];
+    }
+  }
+  if(operation_=="inspect-local"&&phase_=="done"){
+    checkedLocalPath_=state_["local_path"];
+    std::snprintf(localPath_,sizeof(localPath_),"%s",checkedLocalPath_.c_str());
+    localSha_=state_["sha"];localSubject_=state_["subject"];
+    localFingerprint_=state_["fingerprint"];localDirty_=state_["dirty"]=="1";localHasGit_=state_["git"]=="1";
+    localChecked_=state_["compatibility_ok"]=="1";
+    if(localChecked_)saveLocalPreference();
   }
   if(operation_=="list"&&phase_=="done"){
     versions_.clear();for(const auto& row:rows(job_/"versions.tsv"))if(row.size()==7)versions_.push_back({row[0],row[1],row[2],row[3],row[4],row[5],row[6]});
@@ -182,9 +205,13 @@ void CoreVersionView::readResult(){
   }
   if(operation_=="resolve"&&phase_=="done")selected_={"commit",brief(state_["sha"]),state_["sha"],state_["date"],state_["subject"],state_["body"],state_["tag"]};
   if(operation_=="build"&&phase_=="ready"){
-    readyArtifact_=state_["artifact"];readyLabel_=state_["tag"].empty()?brief(state_["sha"]):state_["tag"];
+    readyArtifact_=state_["artifact"];
+    readyLabel_=state_["source_kind"]=="local"?"Paikallinen ASkompu · "+brief(state_["fingerprint"]):
+        state_["tag"].empty()?brief(state_["sha"]):state_["tag"];
   }
   if(phase_=="launched")closeRequested_=true;
+  if(operation_=="doctor"&&phase_=="done"&&sourceMode_==1&&*localPath_)
+    start("inspect-local",{"--local",localPath_});
 }
 void CoreVersionView::poll(){
   if(!running_)return;
@@ -229,13 +256,18 @@ void CoreVersionView::activeCard(){
   const bool columns=ImGui::GetContentRegionAvail().x>510*u();
   if(columns){ImGui::BeginTable("Nykyiset versiot",2);ImGui::TableSetupColumn("Ydin",ImGuiTableColumnFlags_WidthStretch,2.f);ImGui::TableSetupColumn("Sovellus",ImGuiTableColumnFlags_WidthStretch,1.f);ImGui::TableNextColumn();}
   caption("KÄYTÖSSÄ");
+  if(std::string(build::sourceKind)=="local"){
+    ImGui::TextColored(accent,"Paikallinen ASkompu");text(build::sourcePath);
+  }
   ImGui::TextColored(accent,"%.10s",build::coreRevision);ImGui::SameLine();
   text(std::string(*build::coreTag?build::coreTag:"Ei tagia")+"  ·  "+std::string(build::coreDate).substr(0,10));
-  if(ImGui::TreeNode("Ytimen tiedot")){shaRow(build::coreRevision);text(build::coreDate);ImGui::TreePop();}
+  ImGui::TextColored(std::string(build::coreWorktree)=="puhdas"?muted:amber,"%s",build::coreWorktree);
+  ImGui::TextColored(muted,"Näyttö %u × %u",ASKOMPU_DISPLAY_WIDTH,ASKOMPU_DISPLAY_HEIGHT);
+  if(ImGui::TreeNode("Version tiedot")){shaRow(build::coreRevision);text(build::coreDate);text("Lähdetiiviste: "+std::string(build::coreFingerprint));ImGui::TreePop();}
   if(columns)ImGui::TableNextColumn();
   caption("SIMULAATTORI");
   ImGui::Text("%s  ·  %.10s",build::version,build::revision);
-  ImGui::TextColored(std::string(build::coreWorktree)=="puhdas"?muted:amber,"%s",build::coreWorktree);
+  ImGui::TextColored(std::string(build::worktree)=="puhdas"?muted:amber,"%s",build::worktree);
   if(columns)ImGui::EndTable();
   if(!previous_.empty()){
     gap(4);ImGui::BeginDisabled(running_);
@@ -255,6 +287,96 @@ void CoreVersionView::requirementsCard(){
 #endif
     ImGui::BeginDisabled(running_);if(button("Tarkista työkalut uudelleen"))start("doctor");ImGui::EndDisabled();
   }
+}
+void CoreVersionView::saveLocalPreference(){
+  std::error_code ec;fs::create_directories(home_,ec);
+  if(!ec){std::ofstream preference(home_/"local-source.txt");preference<<localPath_<<'\n'<<profile_<<'\n';}
+}
+void CoreVersionView::navigateFolder(const fs::path& path){
+  browseFolders_.clear();browseError_.clear();std::error_code ec;
+  const auto absolute=fs::absolute(path,ec);
+  if(ec||!fs::is_directory(absolute,ec)){browseError_="Kansiota ei voi avata.";return;}
+  browsePath_=absolute.lexically_normal();
+  fs::directory_iterator iterator(browsePath_,fs::directory_options::skip_permission_denied,ec),end;
+  for(;!ec&&iterator!=end;iterator.increment(ec)){
+    const auto entry=iterator->path();std::error_code typeError;
+    if(iterator->is_directory(typeError)&&entry.filename().u8string().front()!='.')browseFolders_.push_back(entry);
+  }
+  if(ec)browseError_="Kaikkia alikansioita ei voitu lukea.";
+  std::sort(browseFolders_.begin(),browseFolders_.end());
+}
+void CoreVersionView::folderPicker(){
+  if(folderOpen_){ImGui::OpenPopup("Valitse ASkompu-kansio");folderOpen_=false;}
+  ImGui::SetNextWindowSize({std::min(640*u(),ImGui::GetIO().DisplaySize.x-30*u()),0},ImGuiCond_Always);
+  if(!ImGui::BeginPopupModal("Valitse ASkompu-kansio",nullptr,ImGuiWindowFlags_AlwaysAutoResize))return;
+  text(browsePath_.u8string());
+  if(button("Ylempi kansio")&&browsePath_.has_parent_path())navigateFolder(browsePath_.parent_path());
+#ifdef _WIN32
+  ImGui::SameLine();
+  if(ImGui::BeginCombo("Asema",browsePath_.root_name().u8string().c_str())){
+    for(char drive='A';drive<='Z';++drive){const std::string root=std::string(1,drive)+":\\";std::error_code ec;
+      if(fs::is_directory(fs::u8path(root),ec)&&ImGui::Selectable(root.c_str()))navigateFolder(fs::u8path(root));}
+    ImGui::EndCombo();
+  }
+#endif
+  gap(4);caption("Avaa kansio kaksoisnapsautuksella");
+  fs::path next;
+  ImGui::BeginChild("Kansiot",{0,std::min(280*u(),ImGui::GetIO().DisplaySize.y*.32f)},ImGuiChildFlags_Borders);
+  if(browseFolders_.empty())caption("Ei alikansioita");
+  for(const auto& folder:browseFolders_){
+    const auto name=folder.filename().u8string();
+    if(ImGui::Selectable(name.c_str(),false,ImGuiSelectableFlags_AllowDoubleClick)&&ImGui::IsMouseDoubleClicked(0))next=folder;
+  }
+  ImGui::EndChild();
+  if(!next.empty())navigateFolder(next);
+  if(!browseError_.empty())ImGui::TextColored(amber,"%s",browseError_.c_str());
+  std::error_code ec;const bool hasCore=fs::is_regular_file(browsePath_/"src/core/ApplicationCore.cpp",ec);
+  ImGui::TextColored(hasCore?accent:muted,"%s",hasCore?"ASkompu-lähteet löytyivät":"Valitse projektin juuri, jossa on src ja include");
+  gap(6);
+  if(button("Peruuta kansion valinta"))ImGui::CloseCurrentPopup();
+  ImGui::SameLine();ImGui::BeginDisabled(!hasCore);
+  if(button("Käytä tätä kansiota",true)){
+    std::snprintf(localPath_,sizeof(localPath_),"%s",browsePath_.u8string().c_str());
+    localChecked_=false;start("inspect-local",{"--local",localPath_});ImGui::CloseCurrentPopup();
+  }
+  ImGui::EndDisabled();ImGui::EndPopup();
+}
+void CoreVersionView::localCard(){
+  caption("PAIKALLINEN ASKOMPU");gap(4);
+  text("Valitse lähdekansio. Myös tallennetut, committoimattomat muutokset tulevat mukaan.");gap(4);
+  ImGui::BeginDisabled(running_);
+  ImGui::SetNextItemWidth(-1);
+  if(ImGui::InputTextWithHint("##PaikallinenPolku","ASkompu-projektin kansio",localPath_,sizeof(localPath_)))localChecked_=false;
+  hits_["Paikallinen polku"]={ImGui::GetItemRectMin(),ImGui::GetItemRectMax()};
+  if(button("Valitse kansio…")){
+    const char* home=std::getenv("HOME");
+#ifdef _WIN32
+    if(!home)home=std::getenv("USERPROFILE");
+#endif
+    navigateFolder(fs::u8path(*localPath_?localPath_:home?home:"."));folderOpen_=true;
+  }
+  ImGui::SameLine();ImGui::BeginDisabled(!*localPath_);
+  if(button("Tarkista kansio")){localChecked_=false;start("inspect-local",{"--local",localPath_});}
+  ImGui::EndDisabled();ImGui::EndDisabled();
+  if(localChecked_){
+    gap(8);ImGui::TextColored(accent,"Kansio valmis kokeiltavaksi");
+    text(fs::u8path(checkedLocalPath_).filename().u8string());
+    ImGui::TextColored(localDirty_?amber:muted,"%s",!localHasGit_?"Lähdekansio ilman Git-tietoja":
+        localDirty_?"Sisältää paikallisia muutoksia":"Ei committoimattomia muutoksia");
+    if(ImGui::TreeNode("Paikallisen version tiedot")){text(checkedLocalPath_);text(localSubject_);shaRow(localSha_);text("Lähdetiiviste: "+localFingerprint_);ImGui::TreePop();}
+  }
+  gap(8);ImGui::BeginDisabled(running_);
+  caption("NÄYTTÖKOKO");const char* profiles[]={"320 × 170","480 × 320"};
+  ImGui::SetNextItemWidth(180*u());if(ImGui::Combo("##PaikallinenNäyttö",&profile_,profiles,2))saveLocalPreference();
+  ImGui::EndDisabled();
+  gap(6);ImGui::BeginDisabled(running_||!requirementsOk_||!localChecked_);
+  if(button("Rakenna ja testaa",true,{-1,44*u()})){
+    readyExpanded_=true;readyArtifact_.clear();saveLocalPreference();
+    start("build",{"--local",checkedLocalPath_,"--profile",profile_==0?"320x170":"480x320"});
+  }
+  ImGui::EndDisabled();
+  caption("Rakennus tehdään erikseen. Lähdekansiota ei muuteta.");
+  if(!requirementsOk_)caption("Tarkista rakennustyökalut ennen rakentamista.");
 }
 float CoreVersionView::versionList(){
   caption("VALITSE LÄHDEVERSIO");gap(5);
@@ -307,9 +429,12 @@ void CoreVersionView::selectionCard(){
     if(ImGui::TreeNode("Version tarkat tiedot")){shaRow(selected_.sha);text(selected_.date);ImGui::TreePop();}
     if(!selected_.body.empty()&&ImGui::TreeNode("Commitin koko viesti")){text(selected_.body);ImGui::TreePop();}
   }
-
+  gap(6);ImGui::BeginDisabled(running_);
+  caption("NÄYTTÖKOKO");const char* profiles[]={"320 × 170","480 × 320"};
+  ImGui::SetNextItemWidth(180*u());if(ImGui::Combo("##GitHubNäyttö",&profile_,profiles,2))saveLocalPreference();
+  ImGui::EndDisabled();
   gap(6);ImGui::BeginDisabled(running_||!requirementsOk_||selected_.sha.empty());
-  if(button("Rakenna valittu ydin",true,{-1,44*u()})){readyExpanded_=true;readyArtifact_.clear();start("build",{"--ref",selected_.sha});}
+  if(button("Rakenna ja testaa",true,{-1,44*u()})){readyExpanded_=true;readyArtifact_.clear();start("build",{"--ref",selected_.sha,"--profile",profile_==0?"320x170":"480x320"});}
   ImGui::EndDisabled();
   if(ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)){ImGui::BeginTooltip();ImGui::PushTextWrapPos(ImGui::GetFontSize()*28);text("Rakennetaan ja testataan erikseen. Nykyinen ohjelma säilyy käytössä.");ImGui::PopTextWrapPos();ImGui::EndTooltip();}
   if(!requirementsOk_)caption("Tarkista rakennustyökalut ennen rakentamista.");
@@ -323,7 +448,7 @@ void CoreVersionView::progressCard(){
     if(button("Näytä rakennus"))readyExpanded_=true;
     ImGui::EndChild();return;
   }
-  ImGui::TextColored(failed?red:ready?accent:muted,"%s",ready?"ASkompu-ydin valmis":failed?"Toiminto ei valmistunut":running_?"TOIMINTO KÄYNNISSÄ":"TILA");
+  ImGui::TextColored(failed?red:ready?accent:muted,"%s",ready?"ASkompu-versio valmis":failed?"Toiminto ei valmistunut":running_?"TOIMINTO KÄYNNISSÄ":"TILA");
   if(failed||phase_=="cancelled"||running_)text(error_.empty()?message_:error_);
   if(operation_=="build"&&!state_["sha"].empty())text("Valittu ydin: "+brief(state_["sha"])+"  ·  "+state_["subject"]);
   if(running_&&operation_=="build"){
@@ -345,7 +470,7 @@ void CoreVersionView::progressCard(){
   if(!readyArtifact_.empty()&&!running_){
     gap(6);text(readyLabel_);caption("Rakennus ja testit hyväksytty");
 
-    if(button("Käynnistä uudelleen",true))restartPending_=true;
+    if(button("Avaa rakennettu versio",true))restartPending_=true;
     ImGui::SameLine();if(button("Myöhemmin"))readyExpanded_=false;
   }
   gap(8);
@@ -361,31 +486,40 @@ void CoreVersionView::render(){
   hits_.clear();
   if(scrollTop_){ImGui::SetScrollY(0);scrollTop_=false;}
   if(!initialized_){initialized_=true;start("doctor");}
-  ImGui::TextUnformatted("Ytimen versio");
+  ImGui::TextUnformatted("ASkompu-versio");
   gap(6);
   const bool wideLayout=ImGui::GetContentRegionAvail().x>940*u();
   ImGui::BeginChild("Käytössä oleva ydin",{0,0},ImGuiChildFlags_Borders|ImGuiChildFlags_AutoResizeY|ImGuiChildFlags_AlwaysAutoResize|ImGuiChildFlags_AlwaysUseWindowPadding);activeCard();ImGui::EndChild();
   if(running_||phase_=="failed"||phase_=="cancelled"||!readyArtifact_.empty())progressCard();
-  gap(10);
-  ImGui::BeginDisabled(running_);
-  if(button("Päivitä versiolista"))start("list");
-  ImGui::EndDisabled();
-  if(ImGui::GetContentRegionAvail().x>580*u())ImGui::SameLine();
-  caption("Mikky100/ASkompu");
-  if(!upstream_.empty()&&ImGui::IsItemHovered()){ImGui::BeginTooltip();ImGui::PushTextWrapPos(ImGui::GetFontSize()*28);text("Testilähde: "+upstream_);ImGui::PopTextWrapPos();ImGui::EndTooltip();}
-  gap(10);
-  if(wideLayout){
-    ImGui::BeginTable("Version valinta",2,ImGuiTableFlags_SizingStretchProp);
-    ImGui::TableSetupColumn("Versiot",ImGuiTableColumnFlags_WidthStretch,1.4f);ImGui::TableSetupColumn("Valinta",ImGuiTableColumnFlags_WidthStretch,1.f);
-    ImGui::TableNextColumn();const float listTop=versionList();ImGui::TableNextColumn();
-    ImGui::SetCursorScreenPos({ImGui::GetCursorScreenPos().x,listTop});
-    ImGui::BeginChild("Valittu versio",{0,0},ImGuiChildFlags_AutoResizeY|ImGuiChildFlags_AlwaysAutoResize|ImGuiChildFlags_AlwaysUseWindowPadding);selectionCard();ImGui::EndChild();ImGui::EndTable();
-  }else{versionList();gap(10);selectionCard();}
+  gap(10);ImGui::BeginDisabled(running_);
+  if(button("Paikallinen kansio",sourceMode_==1))sourceMode_=1;
+  ImGui::SameLine();if(button("GitHub",sourceMode_==0))sourceMode_=0;
+  ImGui::EndDisabled();gap(8);
+  if(sourceMode_==1){
+    ImGui::BeginChild("Paikallinen lähde",{0,0},ImGuiChildFlags_AutoResizeY|ImGuiChildFlags_AlwaysAutoResize|ImGuiChildFlags_AlwaysUseWindowPadding);
+    localCard();ImGui::EndChild();
+  }else{
+    ImGui::BeginDisabled(running_);
+    if(button("Päivitä versiolista"))start("list");
+    ImGui::EndDisabled();
+    if(ImGui::GetContentRegionAvail().x>580*u())ImGui::SameLine();
+    caption("Mikky100/ASkompu");
+    if(!upstream_.empty()&&ImGui::IsItemHovered()){ImGui::BeginTooltip();ImGui::PushTextWrapPos(ImGui::GetFontSize()*28);text("Testilähde: "+upstream_);ImGui::PopTextWrapPos();ImGui::EndTooltip();}
+    gap(10);
+    if(wideLayout){
+      ImGui::BeginTable("Version valinta",2,ImGuiTableFlags_SizingStretchProp);
+      ImGui::TableSetupColumn("Versiot",ImGuiTableColumnFlags_WidthStretch,1.4f);ImGui::TableSetupColumn("Valinta",ImGuiTableColumnFlags_WidthStretch,1.f);
+      ImGui::TableNextColumn();const float listTop=versionList();ImGui::TableNextColumn();
+      ImGui::SetCursorScreenPos({ImGui::GetCursorScreenPos().x,listTop});
+      ImGui::BeginChild("Valittu versio",{0,0},ImGuiChildFlags_AutoResizeY|ImGuiChildFlags_AlwaysAutoResize|ImGuiChildFlags_AlwaysUseWindowPadding);selectionCard();ImGui::EndChild();ImGui::EndTable();
+    }else{versionList();gap(10);selectionCard();}
+  }
   gap(10);requirementsCard();
+  folderPicker();
   if(restartPending_||rollbackPending_)ImGui::OpenPopup("Aloitetaanko uusi sessio?");
   ImGui::SetNextWindowSize({std::min(500*u(),ImGui::GetIO().DisplaySize.x-30*u()),0},ImGuiCond_Always);
   if(ImGui::BeginPopupModal("Aloitetaanko uusi sessio?",nullptr,ImGuiWindowFlags_AlwaysAutoResize)){
-    text(rollbackPending_?"Käynnistetään edellinen toimiva ohjelma. Nykyisen ajon muistissa olevat tiedot eivät siirry.":"Uusi ASkompu-ydin on rakennettu ja testattu. Nykyisen ajon muistissa olevat tiedot eivät siirry uuteen ohjelmaan.");
+    text(rollbackPending_?"Käynnistetään edellinen toimiva ohjelma. Nykyisen ajon muistissa olevat tiedot eivät siirry.":"Uusi ASkompu-versio on rakennettu ja testattu. Nykyisen ajon muistissa olevat tiedot eivät siirry uuteen ohjelmaan.");
     gap(8);text("Nykyinen ikkuna suljetaan vasta, kun uusi ikkuna on avautunut. Epäonnistuminen jättää nykyisen ohjelman käyttöön.");gap(8);
     if(button("Peruuta käynnistys")){restartPending_=rollbackPending_=false;ImGui::CloseCurrentPopup();}
     ImGui::SameLine();if(button("Aloita uusi sessio",true)){

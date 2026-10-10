@@ -63,6 +63,27 @@ class VersionsTest(unittest.TestCase):
             with self.subTest(ref=ref), self.assertRaises(cv.VersionError):
                 self.backend.resolve(cache, ref)
 
+    def test_cli_resolve_explicit_empty_or_whitespace_ref_fails_before_fetch(self):
+        for ref in ('', ' ', '\t\n'):
+            with self.subTest(ref=repr(ref)), patch.object(cv.Backend, 'fetch', side_effect=AssertionError('invalid ref must not fetch')) as fetch:
+                result = cv.main(['resolve', '--home', str(self.backend.home), '--job', str(self.backend.job), '--ref', ref])
+                self.assertEqual(result, 1)
+                fetch.assert_not_called()
+                state = json.loads((self.backend.job/'state.json').read_text())
+                self.assertEqual(state['phase'], 'failed')
+                self.assertEqual(state['failed_phase'], 'starting')
+                self.assertIn('40-merkkinen', state['message'])
+
+    def test_cli_resolve_omitted_ref_defaults_to_actual_main(self):
+        with patch.object(cv.Backend, 'fetch', return_value=self.repo) as fetch:
+            result = cv.main(['resolve', '--home', str(self.backend.home), '--job', str(self.backend.job)])
+        self.assertEqual(result, 0)
+        fetch.assert_called_once()
+        state = json.loads((self.backend.job/'state.json').read_text())
+        self.assertEqual(state['phase'], 'done')
+        self.assertEqual(state['sha'], self.new)
+        self.assertEqual(state['subject'], 'Uusi versio')
+
     def test_remote_failure_is_not_success(self):
         result = cv.main(['list', '--home', str(self.root/'bad-home'), '--job', str(self.root/'bad-job'), '--upstream', str(self.root/'absent')])
         self.assertEqual(result, 1)
@@ -216,6 +237,300 @@ class VersionsTest(unittest.TestCase):
         result=cv.main(['build','--home',str(self.backend.home),'--job',str(self.backend.job),'--cmake-option=-DASKOMPU_CORE_ROOT=/wrong'])
         self.assertEqual(result,1)
         self.assertEqual(json.loads((self.backend.job/'state.json').read_text())['phase'],'failed')
+
+    def prepare_local(self, commit=True):
+        for relative in cv.LOCAL_REQUIRED:
+            file = self.repo / relative
+            file.parent.mkdir(parents=True, exist_ok=True)
+            file.write_text('// local source fixture\n')
+        (self.repo/'include').mkdir()
+        (self.repo/'include/BoardConfig.h').write_text('// configuration\n')
+        (self.repo/'LICENSE').write_text('License fixture\n')
+        (self.repo/'platformio.ini').write_text('[env:test]\n')
+        if commit:
+            git(self.repo, 'add', '.')
+            git(self.repo, 'commit', '-m', 'Local source fixture')
+        return self.repo
+
+    def test_inspect_local_reports_real_head_dirty_fingerprint_without_network_or_writes(self):
+        source = self.prepare_local()
+        head = git(source, 'rev-parse', 'HEAD')
+        index_before = (source/'.git/index').read_bytes()
+        index_mtime = (source/'.git/index').stat().st_mtime_ns
+        clean = self.backend.inspect_local(source)
+        (source/'src/core/Clock.cpp').write_text('// uncommitted feature\n')
+        (source/'src/core/LocalFeature.h').write_text('// untracked feature\n')
+        expected = cv.local_inventory(source)
+        with patch.object(self.backend, 'fetch', side_effect=AssertionError('local must not fetch')):
+            dirty = self.backend.inspect_local(source)
+        self.assertEqual(dirty['sha'], head)
+        self.assertEqual(dirty['dirty'], 1)
+        self.assertEqual(clean['dirty'], 0)
+        self.assertNotEqual(clean['fingerprint'], dirty['fingerprint'])
+        self.assertEqual(dirty['source_kind'], 'local')
+        self.assertEqual(dirty['local_path'], str(source))
+        self.assertEqual(cv.local_inventory(source), expected)
+        self.assertEqual((source/'.git/index').read_bytes(), index_before)
+        self.assertEqual((source/'.git/index').stat().st_mtime_ns, index_mtime)
+        self.assertFalse((self.backend.home/'upstream.git').exists())
+
+    def test_local_capture_is_exact_and_omits_unrelated_builds_git_and_simulator(self):
+        source = self.prepare_local()
+        for relative in ('simulator/build/binary.exe', '.pio/build/firmware.bin', 'build/cache',
+                         'src/build/temporary.cpp', 'src/old.o'):
+            path = source / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b'unrelated')
+        (source/'src/core/Clock.cpp').write_text('// saved uncommitted change')
+        before = cv.local_inventory(source)
+        core = self.root/'snapshot'
+        selected, manifest = self.backend.capture_local(source, core)
+        self.assertEqual(cv.verify_snapshot(core, manifest)['fingerprint'], selected['fingerprint'])
+        self.assertEqual(cv.local_inventory(core), before)
+        self.assertEqual((core/'src/core/Clock.cpp').read_bytes(), (source/'src/core/Clock.cpp').read_bytes())
+        self.assertFalse((core/'.git').exists())
+        self.assertFalse((core/'simulator').exists())
+        self.assertFalse((core/'src/build').exists())
+        self.assertEqual(cv.local_inventory(source), before)
+        self.assertEqual(selected['dirty'], 1)
+
+    def test_plain_local_directory_does_not_borrow_parent_git_metadata(self):
+        source = self.prepare_local()
+        nested = source/'local-export'
+        nested.mkdir()
+        for name in cv.LOCAL_TREES:
+            cv.shutil.copytree(source/name, nested/name)
+        selected = self.backend.inspect_local(nested)
+        self.assertEqual(selected['git'], 0)
+        self.assertEqual(selected['sha'], 'tuntematon')
+
+    @unittest.skipIf(os.name == 'nt', 'Windows symlink creation may require developer privileges')
+    def test_local_source_rejects_file_and_directory_symlinks(self):
+        source = self.prepare_local()
+        outside = self.root/'outside.txt'
+        outside.write_text('outside')
+        link = source/'src/escape.h'
+        link.symlink_to(outside)
+        with self.assertRaises(cv.VersionError):
+            self.backend.inspect_local(source)
+        link.unlink()
+        link.symlink_to(source/'include', target_is_directory=True)
+        with self.assertRaises(cv.VersionError):
+            self.backend.capture_local(source, self.root/'snapshot')
+        self.assertFalse((self.root/'snapshot').exists())
+
+    def test_source_edit_during_capture_is_rejected_and_no_partial_snapshot_survives(self):
+        source = self.prepare_local()
+        count = len(cv.local_inventory(source))
+        original_read = cv.checked_read
+        calls = 0
+        def change_during_copy(root, relative):
+            nonlocal calls
+            calls += 1
+            if calls == count * 2 + 1:
+                (source/relative).write_text('// developer saved a newer version\n')
+            return original_read(root, relative)
+        with patch.object(cv, 'checked_read', change_during_copy), self.assertRaises(cv.VersionError):
+            self.backend.capture_local(source, self.root/'snapshot')
+        self.assertFalse((self.root/'snapshot').exists())
+        self.assertEqual(git(source, 'rev-parse', 'HEAD'), self.backend.local_metadata(source)['sha'])
+
+    def cmake_snapshot_check(self, core, manifest):
+        validator = SCRIPT.parents[1]/'cmake/ValidateCore.cmake'
+        driver = self.root/'validate-local.cmake'
+        driver.write_text(f'cmake_minimum_required(VERSION 3.25)\ninclude("{validator.as_posix()}")\naskompu_validate_core()\n')
+        return subprocess.run(['cmake', f'-DASKOMPU_ROOT={self.root}', f'-DASKOMPU_CORE_ROOT={core}',
+                               f'-DASKOMPU_CORE_SNAPSHOT={manifest}', '-P', str(driver)], capture_output=True, text=True)
+
+    def test_python_and_cmake_verify_snapshot_hashes_and_complete_inventory(self):
+        source = self.prepare_local()
+        for modification in ('file', 'extra', 'hidden', 'manifest'):
+            core = self.root/modification
+            _, manifest = self.backend.capture_local(source, core)
+            accepted = self.cmake_snapshot_check(core, manifest)
+            self.assertEqual(accepted.returncode, 0, accepted.stdout+accepted.stderr)
+            if modification == 'file':
+                (core/'src/core/Clock.cpp').write_text('// tampered')
+            elif modification in ('extra', 'hidden'):
+                (core/('.hidden' if modification == 'hidden' else 'extra.cpp')).write_text('extra')
+            else:
+                data = json.loads(manifest.read_text())
+                data['fingerprint'] = '0'*64
+                cv.json_write(manifest, data)
+            with self.subTest(modification=modification):
+                with self.assertRaises(cv.VersionError):
+                    cv.verify_snapshot(core, manifest)
+                self.assertNotEqual(self.cmake_snapshot_check(core, manifest).returncode, 0)
+
+    def test_manifest_path_traversal_duplicates_and_symlinks_are_rejected(self):
+        source = self.prepare_local()
+        for relative in ('../outside.h', '/outside.h', 'src/../outside.h', 'src/bad;name.h', 'src//bad.h', 'src\\bad.h'):
+            with self.subTest(relative=relative), self.assertRaises(cv.VersionError):
+                cv.local_relative_path(relative)
+        core = self.root/'snapshot'
+        _, manifest = self.backend.capture_local(source, core)
+        data = json.loads(manifest.read_text())
+        data['files'][0]['path'] = '../outside.h'
+        cv.json_write(manifest, data)
+        with self.assertRaises(cv.VersionError):
+            cv.verify_snapshot(core, manifest)
+        self.assertNotEqual(self.cmake_snapshot_check(core, manifest).returncode, 0)
+
+    @unittest.skipIf(os.name == 'nt', 'Windows symlink creation may require developer privileges')
+    def test_snapshot_symlinked_file_directory_root_and_manifest_are_rejected(self):
+        source = self.prepare_local()
+        for mode in ('file', 'directory', 'root', 'manifest'):
+            core = self.root/('snapshot-'+mode)
+            _, manifest = self.backend.capture_local(source, core)
+            if mode == 'file':
+                path = core/'src/core/Clock.cpp'
+                path.unlink()
+                path.symlink_to(source/'src/core/Clock.cpp')
+            elif mode == 'directory':
+                cv.shutil.rmtree(core/'include')
+                (core/'include').symlink_to(source/'include', target_is_directory=True)
+            elif mode == 'root':
+                real = self.root/'real-snapshot'
+                core.rename(real)
+                core.symlink_to(real, target_is_directory=True)
+            else:
+                real = core/'manifest-real.json'
+                manifest.rename(real)
+                manifest.symlink_to(real)
+            with self.subTest(mode=mode), self.assertRaises(cv.VersionError):
+                cv.verify_snapshot(core, manifest)
+            self.assertNotEqual(self.cmake_snapshot_check(core, manifest).returncode, 0)
+
+    def fake_local_toolchain(self, source, tamper=False, wrong_version=False):
+        real_run = self.backend.run
+        commands, captured = [], {}
+        def run(command, cwd=None, **kwargs):
+            if str(command[0]) == 'git':
+                return real_run(command, cwd=cwd, **kwargs)
+            commands.append(command)
+            if command[:2] == ['cmake', '--preset']:
+                core = Path(next(arg.split('=',1)[1] for arg in command if str(arg).startswith('-DASKOMPU_CORE_ROOT=')))
+                manifest = Path(next(arg.split('=',1)[1] for arg in command if str(arg).startswith('-DASKOMPU_CORE_SNAPSHOT=')))
+                captured.update(cv.verify_snapshot(core, manifest))
+                self.assertEqual((core/'src/core/Clock.cpp').read_text(), '// local source fixture\n')
+                (source/'src/core/Clock.cpp').write_text('// changed after immutable capture\n')
+                if tamper:
+                    (core/'src/core/Clock.cpp').write_text('// forbidden snapshot edit\n')
+            if command[0] == 'cmake' and '--install' in command:
+                app = Path(command[-1])
+                exe = app/('askompu-simulaattori.exe' if os.name=='nt' else 'bin/askompu-simulaattori')
+                exe.parent.mkdir(parents=True)
+                exe.write_bytes(b'fixture local executable')
+            if '--versio' in command:
+                state = 'paikallisia muutoksia' if captured['dirty'] else 'puhdas'
+                fingerprint = '0'*64 if wrong_version else captured['fingerprint']
+                return f'ASkompu-ydin: {captured["sha"]}\nYtimen työpuu: {state}\nYtimen lähde: local\nPaikallinen lähde: {source}\nASkompu-lähteiden SHA-256: {fingerprint}'
+            return ''
+        return commands, captured, patch.object(self.backend, 'run', run)
+
+    def test_local_build_uses_frozen_dirty_snapshot_and_keeps_all_test_gates(self):
+        source = self.prepare_local(commit=False)
+        for profile in ('320x170', '480x320'):
+            (source/'src/core/Clock.cpp').write_text('// local source fixture\n')
+            commands, captured, run_patch = self.fake_local_toolchain(source)
+            with patch.object(self.backend, 'requirements', return_value=''), run_patch, patch.object(self.backend, 'fetch', side_effect=AssertionError('No network')):
+                ready = self.backend.build(None, self.bundle, local=source, profile=profile)
+            self.assertEqual(ready['sha'], self.new)
+            self.assertEqual(ready['dirty'], 1)
+            self.assertEqual(ready['source_kind'], 'local')
+            self.assertEqual(ready['fingerprint'], captured['fingerprint'])
+            self.assertEqual(ready['profile'], profile)
+            self.assertTrue(any(command[:2] == ['ctest', '--preset'] for command in commands))
+            self.assertTrue(any('--tarkista' in command for command in commands))
+            self.assertTrue(any(f'-DASKOMPU_DISPLAY_PROFILE={profile}' in command for command in commands))
+        self.assertFalse((self.backend.home/'upstream.git').exists())
+
+    def test_local_snapshot_or_installed_fingerprint_tamper_prevents_ready(self):
+        source = self.prepare_local()
+        for tamper, wrong_version in ((True, False), (False, True)):
+            (source/'src/core/Clock.cpp').write_text('// local source fixture\n')
+            _, _, run_patch = self.fake_local_toolchain(source, tamper, wrong_version)
+            with run_patch, patch.object(self.backend, 'requirements', return_value=''), self.assertRaises(cv.VersionError):
+                self.backend.build(None, self.bundle, local=source)
+        self.assertFalse((self.backend.home/'latest-ready.json').exists())
+
+    def test_cli_source_flags_are_exclusive_and_source_workspace_is_not_written(self):
+        with self.assertRaises(SystemExit):
+            cv.main(['build', '--home', str(self.backend.home), '--ref', 'main', '--local', str(self.repo)])
+        nested_home = self.repo/'should-not-exist'
+        with self.assertRaises(SystemExit):
+            cv.main(['inspect-local', '--home', str(nested_home), '--local', str(self.repo)])
+        self.assertFalse(nested_home.exists())
+
+    def test_incremental_local_cache_reuses_exact_sources_and_updates_only_changed_files(self):
+        source = self.prepare_local()
+        (source/'src/core/TemporaryFeature.h').write_text('// before')
+        selected, _ = self.backend.capture_local(source, self.root/'snapshot-one')
+        cached_core, cached_source = self.backend.prepare_local_cache(self.bundle, self.root/'snapshot-one', selected, '480x320', ())
+        stable = cached_core/'src/core/ApplicationCore.cpp'
+        stable_time = stable.stat().st_mtime_ns
+        changed = cached_core/'src/core/Clock.cpp'
+        changed_time = changed.stat().st_mtime_ns
+        (source/'src/core/Clock.cpp').write_text('// changed in editor')
+        (source/'src/core/TemporaryFeature.h').unlink()
+        selected2, _ = self.backend.capture_local(source, self.root/'snapshot-two')
+        cached_core2, cached_source2 = self.backend.prepare_local_cache(self.bundle, self.root/'snapshot-two', selected2, '480x320', ())
+        self.assertEqual(cached_core2, cached_core)
+        self.assertEqual(cached_source2, cached_source)
+        self.assertEqual(stable.stat().st_mtime_ns, stable_time)
+        self.assertNotEqual(changed.stat().st_mtime_ns, changed_time)
+        self.assertEqual(changed.read_text(), '// changed in editor')
+        self.assertFalse((cached_core/'src/core/TemporaryFeature.h').exists())
+        self.assertEqual(cv.verify_snapshot(cached_core, cached_core/cv.SNAPSHOT_NAME)['fingerprint'], selected2['fingerprint'])
+        other_core, _ = self.backend.prepare_local_cache(self.bundle, self.root/'snapshot-two', selected2, '320x170', ())
+        self.assertNotEqual(other_core, cached_core)
+
+    def test_local_cache_source_or_snapshot_tampering_is_not_reused(self):
+        source = self.prepare_local()
+        selected, _ = self.backend.capture_local(source, self.root/'snapshot')
+        cached_core, cached_source = self.backend.prepare_local_cache(self.bundle, self.root/'snapshot', selected, '480x320', ())
+        (cached_source/'simulator/CMakeLists.txt').write_text('unexpected change')
+        with self.assertRaises(cv.VersionError):
+            self.backend.prepare_local_cache(self.bundle, self.root/'snapshot', selected, '480x320', ())
+        (cached_source/'simulator/CMakeLists.txt').write_text('test fixture')
+        (cached_core/'src/core/Clock.cpp').write_text('// unexpected change')
+        with self.assertRaises(cv.VersionError):
+            self.backend.prepare_local_cache(self.bundle, self.root/'snapshot', selected, '480x320', ())
+
+    def test_bundle_identity_ignores_zip_timestamps_but_not_source_content(self):
+        first = self.backend.bundle_inventory(self.bundle)
+        second_bundle = self.root/'source-new-time.zip'
+        with zipfile.ZipFile(second_bundle, 'w') as archive:
+            info = zipfile.ZipInfo('simulator/CMakeLists.txt', (2020, 1, 2, 3, 4, 5))
+            archive.writestr(info, 'test fixture')
+        self.assertEqual(self.backend.bundle_inventory(second_bundle), first)
+        with zipfile.ZipFile(second_bundle, 'w') as archive:
+            archive.writestr('simulator/CMakeLists.txt', 'different simulator')
+        self.assertNotEqual(self.backend.bundle_inventory(second_bundle), first)
+
+    def test_cmake_metadata_preserves_utf8_source_origin_and_quoted_local_path(self):
+        source = self.prepare_local()
+        quoted = self.root/'ASkompu ää "local"'
+        source.rename(quoted)
+        selected, manifest = self.backend.capture_local(quoted, self.root/'snapshot')
+        exported = self.root/'exported-simulator'
+        (exported/'simulator').mkdir(parents=True)
+        origin = self.new + '\nsisältää paikallisia muutoksia\n'
+        (exported/'simulator/SOURCE-ORIGIN.txt').write_text(origin, encoding='utf-8')
+        output = self.root/'metadata'
+        generator = SCRIPT.parents[1]/'cmake/GenerateBuildInformation.cmake'
+        result = subprocess.run(['cmake', f'-DASKOMPU_SOURCE_ROOT={exported}', f'-DASKOMPU_CORE_ROOT={manifest.parent}',
+                                 f'-DASKOMPU_CORE_REVISION={selected["sha"]}', f'-DASKOMPU_CORE_SNAPSHOT={manifest}',
+                                 f'-DASKOMPU_OUTPUT_DIR={output}', '-DASKOMPU_VERSION=1.0.0', '-DASKOMPU_CONFIGURATION=Release',
+                                 '-P', str(generator)], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout+result.stderr)
+        header = (output/'BuildInformation.h').read_text(encoding='utf-8')
+        self.assertIn('worktree = "sisältää paikallisia muutoksia";', header)
+        self.assertIn('sourceKind = "local";', header)
+        self.assertIn('sourcePath = "'+str(quoted).replace('\\','\\\\').replace('"','\\"')+'";', header)
+        self.assertIn(selected['fingerprint'], header)
+        self.assertEqual((output/'SOURCE-ORIGIN.txt').read_text(encoding='utf-8'), origin)
+        self.assertIn('Paikallinen lähde: '+str(quoted), (output/'BUILDINFO-Release.txt').read_text(encoding='utf-8'))
 
 
 if __name__ == '__main__':

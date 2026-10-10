@@ -37,7 +37,7 @@ struct Desktop {
 int main(int argc,char** argv) {
   bool check=false,coreCheck=false,coreBuildCheck=false;
   std::string screenshotDirectory;
-  std::string coreHome,coreUpstream,startupReady;
+  std::string coreHome,coreUpstream,startupReady,localCore;
   for(int i=1;i<argc;++i) {
     if(std::strcmp(argv[i],"--versio")==0) {
       namespace build=simulator::desktop::build;
@@ -45,6 +45,8 @@ int main(int argc,char** argv) {
         <<"Lähderevisio: "<<build::revision<<'\n'<<"Työpuu: "<<build::worktree<<'\n'
         <<"ASkompu-ydin: "<<build::coreRevision<<'\n'<<"Ytimen työpuu: "<<build::coreWorktree<<'\n'
         <<"Ytimen tagi: "<<build::coreTag<<'\n'<<"Ytimen päiväys: "<<build::coreDate<<'\n'
+        <<"Ytimen lähde: "<<build::sourceKind<<'\n'<<"Paikallinen lähde: "<<build::sourcePath<<'\n'
+        <<"Näyttöprofiili: "<<ASKOMPU_DISPLAY_WIDTH<<'x'<<ASKOMPU_DISPLAY_HEIGHT<<'\n'
         <<"Yhteinen upstream-pohja: "<<build::upstreamBase<<'\n'
         <<"ASkompu-lähteiden SHA-256: "<<build::coreFingerprint<<'\n'
         <<"Simulaattorilähteiden SHA-256: "<<build::simulatorFingerprint<<'\n';
@@ -55,6 +57,7 @@ int main(int argc,char** argv) {
         "  --versio               Näytä version ja lähteiden tunnisteet\n"
         "  --ohje                 Näytä tämä ohje\n"
         "  --core-home POLKU       Versionvalitsimen erillinen työtila\n"
+        "  --local-core POLKU      Esivalitse paikallinen ASkompu-lähdekansio\n"
         "  --tarkista-ytimenvalitsin  Tarkista versionvalitsimen GUI\n"
         "  --testaa-ytimen-rakennus  Lisää oikea rakennus-, peruutus- ja restart-testi\n"
         "  --tarkista             Suorita näkyvä käyttöliittymän käynnistystesti ja sulje\n"
@@ -65,6 +68,7 @@ int main(int argc,char** argv) {
     else if(std::strcmp(argv[i],"--testaa-ytimen-rakennus")==0)coreBuildCheck=true;
     else if(std::strcmp(argv[i],"--core-home")==0&&i+1<argc)coreHome=argv[++i];
     else if(std::strcmp(argv[i],"--core-upstream")==0&&i+1<argc)coreUpstream=argv[++i];
+    else if(std::strcmp(argv[i],"--local-core")==0&&i+1<argc)localCore=argv[++i];
     else if(std::strcmp(argv[i],"--startup-ready")==0&&i+1<argc)startupReady=argv[++i];
     else if(std::strcmp(argv[i],"--tarkistuskuvat")==0&&i+1<argc)screenshotDirectory=argv[++i];
     else {std::cerr<<"Virhe: tuntematon tai puutteellinen valitsin. Katso --ohje.\n";return 1;}
@@ -106,11 +110,11 @@ int main(int argc,char** argv) {
     if(!ImGui_ImplSDLRenderer2_Init(desktop.renderer))throw std::runtime_error("Käyttöliittymän piirtoa ei voitu alustaa");
     desktop.rendererBackend=true;
     simulator::desktop::AppController controller;
-    simulator::desktop::SimulatorView view(controller,displayFont,coreHome,coreUpstream);
+    simulator::desktop::SimulatorView view(controller,displayFont,desktop.renderer,coreHome,coreUpstream,localCore);
     std::unique_ptr<simulator::desktop::GuiSmokeCheck> smoke;
     if(check)smoke=std::make_unique<simulator::desktop::GuiSmokeCheck>(screenshotDirectory);
     std::unique_ptr<simulator::desktop::CoreVersionSmokeCheck> coreSmoke;
-    if(coreCheck)coreSmoke=std::make_unique<simulator::desktop::CoreVersionSmokeCheck>(screenshotDirectory,coreBuildCheck);
+    if(coreCheck)coreSmoke=std::make_unique<simulator::desktop::CoreVersionSmokeCheck>(screenshotDirectory,coreBuildCheck,!localCore.empty());
     auto previous=std::chrono::steady_clock::now();
     bool done=false;
     while(!done) {
