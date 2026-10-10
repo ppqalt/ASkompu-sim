@@ -84,6 +84,14 @@ class VersionsTest(unittest.TestCase):
         self.assertEqual(state['sha'], self.new)
         self.assertEqual(state['subject'], 'Uusi versio')
 
+    def test_build_explicit_empty_or_whitespace_ref_fails_before_fetch(self):
+        for ref in ('', ' ', '\t\n'):
+            with self.subTest(ref=repr(ref)), patch.object(self.backend, 'fetch') as fetch:
+                with self.assertRaisesRegex(cv.VersionError, '40-merkkinen'):
+                    self.backend.build(ref, self.bundle)
+                fetch.assert_not_called()
+                self.assertFalse((self.backend.home/'builds').exists())
+
     def test_remote_failure_is_not_success(self):
         result = cv.main(['list', '--home', str(self.root/'bad-home'), '--job', str(self.root/'bad-job'), '--upstream', str(self.root/'absent')])
         self.assertEqual(result, 1)

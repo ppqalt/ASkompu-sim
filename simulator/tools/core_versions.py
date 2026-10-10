@@ -582,6 +582,10 @@ class Backend:
             raise VersionError('Tuntematon näyttöprofiili.')
         if local is not None and ref is not None:
             raise VersionError('Valitse Git-versio tai paikallinen lähde, ei molempia.')
+        if local is None:
+            ref = ref if ref is not None else 'main'
+            if not SHA.fullmatch(ref) and ref != 'main' and not ref.startswith('refs/tags/'):
+                raise VersionError('Anna main, refs/tags/TAGI tai täysi 40-merkkinen commit-SHA.')
         missing = self.requirements(bundle)
         if missing:
             raise VersionError('Rakennuksesta puuttuu: ' + missing)
@@ -596,7 +600,7 @@ class Backend:
             self.publish('downloading', 'Paikallinen lähdetilannekuva lukittu', **selected)
         else:
             cache = self.fetch()
-            selected = self.resolve(cache, ref or 'main')
+            selected = self.resolve(cache, ref)
             self.publish('downloading', 'Ladataan lukitun version lähdekoodia', artifact=artifact, profile=profile, source_kind='github', **selected)
             self.git('clone', '--no-local', '--no-hardlinks', '--no-checkout', '--', cache, core)
             self.git('checkout', '--detach', selected['sha'], cwd=core)
