@@ -330,7 +330,8 @@ void CoreVersionView::folderPicker(){
   ImGui::EndChild();
   if(!next.empty())navigateFolder(next);
   if(!browseError_.empty())ImGui::TextColored(amber,"%s",browseError_.c_str());
-  std::error_code ec;const bool hasCore=fs::is_regular_file(browsePath_/"src/core/ApplicationCore.cpp",ec);
+  std::error_code ec;const bool hasCore=!browsePath_.empty()&&
+      fs::is_regular_file(browsePath_/"src/core/ApplicationCore.cpp",ec);
   ImGui::TextColored(hasCore?accent:muted,"%s",hasCore?"ASkompu-lähteet löytyivät":"Valitse projektin juuri, jossa on src ja include");
   gap(6);
   if(button("Peruuta kansion valinta"))ImGui::CloseCurrentPopup();
