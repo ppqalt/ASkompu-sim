@@ -1,4 +1,4 @@
-# ASkompu Core / Ytimen versio — simulaattori 1.1.0
+# ASkompu Core / Ytimen versio — simulaattori 1.1.1
 
 Valitsin löytyy yläpalkin **ASkompu-versio** -painikkeesta. Se keskeyttää
 nykyisen simulaatioajon; voit palata Simulaattori-painikkeella ja jatkaa sitä.

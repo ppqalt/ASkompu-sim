@@ -5,7 +5,7 @@ time and average-speed calculator. Run its real application core on Windows
 or Linux, try route orders, and explore how it responds to speed, time and
 button inputs. The application interface is in Finnish.
 
-**[Download ASkompu Simulator 1.1.0](https://github.com/ppqalt/ASkompu-sim/releases/tag/v1.1.0)**
+**[Download ASkompu Simulator 1.1.1](https://github.com/ppqalt/ASkompu-sim/releases/tag/v1.1.1)**
 
 The packaged simulator uses Mikky100's ASkompu 0.1.2 core at commit
 `427e4026ebc7c510558e847b01ac7bc98c4147bd`. Its display is a desktop preview,
@@ -60,9 +60,9 @@ a failed build or test prevents switching to them.
 
 This is an independent desktop simulation and development tool, not an official
 ASkompu firmware release or a safety-certified vehicle navigation instrument.
-Windows 11 manual desktop validation of 1.1.0, including the complete core
+Windows 11 manual desktop validation of 1.1.1, including the complete core
 build/restart/rollback workflow, remains outstanding. See the
-[release notes](https://github.com/ppqalt/ASkompu-sim/releases/tag/v1.1.0)
+[release notes](https://github.com/ppqalt/ASkompu-sim/releases/tag/v1.1.1)
 for the actual automated checks and platform limits.
 
 ## Development and credits

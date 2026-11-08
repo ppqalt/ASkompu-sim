@@ -2,11 +2,11 @@
 
 ## Varmennustaso
 
-Simulaattorin versio on **1.1.0**. Julkaisun laatuporttiin kuuluvat MSVC x64
+Simulaattorin versio on **1.1.1**. Julkaisun laatuporttiin kuuluvat MSVC x64
 -rakennus, C++- ja Python-testit, DLL-auditin hyväksyntä- ja hylkäystestit
 sekä puretun ZIP-paketin GUI- ja versionvalitsimen peruspolun tarkistus
 Windows Server 2022:ssa SDL:n dummy-ajurilla.
-Toteutuneet tulokset kirjataan [1.1.0-julkaisusivulle](https://github.com/ppqalt/ASkompu-sim/releases/tag/v1.1.0).
+Toteutuneet tulokset kirjataan [1.1.1-julkaisusivulle](https://github.com/ppqalt/ASkompu-sim/releases/tag/v1.1.1).
 
 **Windows 11 -työpöytäajo ja uuden versionvalitsimen koko MSVC-ydinrakennus /
 restart / rollback -ketju ovat manuaalisesti varmentamatta.**

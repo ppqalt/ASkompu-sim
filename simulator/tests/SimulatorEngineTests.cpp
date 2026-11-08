@@ -355,10 +355,11 @@ void testButtonsAndDisplay() {
   CHECK(e.displayModel().atOverlay.visible);
   e.press(ButtonId::At);
   CHECK(!e.displayModel().atOverlay.visible);
-  CHECK(e.application().eventRepository().at(e.application().eventRepository().count()-1)
 #if ASKOMPU_HAS_UPSTREAM_012_UI
+  CHECK(e.application().eventRepository().at(e.application().eventRepository().count()-1)
             ->eventType == domain::DomainEventType::AT);
 #else
+  CHECK(e.application().eventRepository().at(e.application().eventRepository().count()-1)
             ->eventType == domain::DomainEventType::AT_CANCELLED);
 #endif
 }
