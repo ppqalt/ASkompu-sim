@@ -383,9 +383,10 @@ class Backend:
             raise VersionError(f'{Path(str(command[0])).name} epäonnistui (paluuarvo {process.returncode}). Katso tekninen loki.')
         return output.strip()
 
-    def git(self, *arguments, cwd=None):
+    def git(self, *arguments, cwd=None, worktree_config=False):
         env = dict(os.environ, GIT_TERMINAL_PROMPT='0', GCM_INTERACTIVE='never', GIT_CONFIG_NOSYSTEM='1', GIT_OPTIONAL_LOCKS='0')
-        return self.run(['git', '-c', 'core.autocrlf=false', '-c', 'core.hooksPath=',
+        autocrlf = [] if worktree_config else ['-c', 'core.autocrlf=false']
+        return self.run(['git', *autocrlf, '-c', 'core.hooksPath=',
                          '-c', 'protocol.ext.allow=never', *arguments], cwd=cwd, timeout=180, env=env)
 
     def requirements(self, bundle: Path | None):
@@ -483,6 +484,7 @@ class Backend:
             raise VersionError('Lähdekoodi ei vastaa lukittua puhdasta SHA:ta. Rakennus estetty.')
 
     def local_metadata(self, root):
+        root = root.resolve()
         metadata = {'sha': 'tuntematon', 'date': 'tuntematon', 'tag': '', 'subject': root.name,
                     'body': '', 'dirty': 0, 'git': 0, 'source_kind': 'local',
                     'local_path': str(root), 'path': str(root)}
@@ -499,7 +501,7 @@ class Backend:
         if not SHA.fullmatch(sha):
             raise VersionError('Paikallisen Git-lähteen HEAD ei ole kelvollinen commit.')
         metadata.update(self.describe(root, sha))
-        metadata.update(git=1, dirty=int(bool(self.git('status', '--porcelain', '--untracked-files=normal', cwd=root))))
+        metadata.update(git=1, dirty=int(bool(self.git('status', '--porcelain', '--untracked-files=normal', cwd=root, worktree_config=True))))
         return metadata
 
     def inspect_local(self, path: Path, publish=True):
@@ -579,7 +581,7 @@ class Backend:
         if cache.is_symlink():
             raise VersionError('Paikallisen rakennuksen välimuistin polku muuttui.')
         if cache.exists():
-            if cache.is_symlink() or json.loads((cache/'identity.json').read_text()) != identity:
+            if cache.is_symlink() or json.loads((cache/'identity.json').read_text(encoding='utf-8')) != identity:
                 raise VersionError('Paikallisen rakennuksen välimuistin alkuperätiedot muuttuivat.')
             self.recover_local_cache_update(cache, identity)
             previous = verify_snapshot(core, core/SNAPSHOT_NAME)

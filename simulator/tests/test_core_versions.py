@@ -470,11 +470,20 @@ sys.exit(cv.main(["doctor","--home",sys.argv[2],"--job",sys.argv[3]]))
         self.assertEqual(clean['dirty'], 0)
         self.assertNotEqual(clean['fingerprint'], dirty['fingerprint'])
         self.assertEqual(dirty['source_kind'], 'local')
-        self.assertEqual(dirty['local_path'], str(source))
+        self.assertEqual(dirty['local_path'], str(source.resolve()))
         self.assertEqual(cv.local_inventory(source), expected)
         self.assertEqual((source/'.git/index').read_bytes(), index_before)
         self.assertEqual((source/'.git/index').stat().st_mtime_ns, index_mtime)
         self.assertFalse((self.backend.home/'upstream.git').exists())
+
+    def test_local_status_respects_repository_line_endings(self):
+        source = self.prepare_local()
+        git(source, 'config', 'core.autocrlf', 'true')
+        target = source/'src/core/Clock.cpp'
+        target.write_bytes(b'// windows line ending\r\n')
+        git(source, 'add', '.')
+        git(source, 'commit', '-m', 'CRLF source')
+        self.assertEqual(self.backend.inspect_local(source)['dirty'], 0)
 
     def test_local_capture_is_exact_and_omits_unrelated_builds_git_and_simulator(self):
         source = self.prepare_local()
@@ -627,7 +636,7 @@ sys.exit(cv.main(["doctor","--home",sys.argv[2],"--job",sys.argv[3]]))
             if '--versio' in command:
                 state = 'paikallisia muutoksia' if captured['dirty'] else 'puhdas'
                 fingerprint = '0'*64 if wrong_version else captured['fingerprint']
-                return f'ASkompu-ydin: {captured["sha"]}\nYtimen työpuu: {state}\nYtimen lähde: local\nPaikallinen lähde: {source}\nASkompu-lähteiden SHA-256: {fingerprint}\nNäyttöprofiili: {captured["compiled_profile"]}'
+                return f'ASkompu-ydin: {captured["sha"]}\nYtimen työpuu: {state}\nYtimen lähde: local\nPaikallinen lähde: {source.resolve()}\nASkompu-lähteiden SHA-256: {fingerprint}\nNäyttöprofiili: {captured["compiled_profile"]}'
             return ''
         return commands, captured, patch.object(self.backend, 'run', run)
 
