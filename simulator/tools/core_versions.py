@@ -73,7 +73,30 @@ def source_fingerprint(files):
     return hashlib.sha256(''.join(f'{f["path"]}:{f["sha256"]}\n' for f in files).encode('utf-8')).hexdigest()
 
 
+def _windows_file_identity(fd):
+    # Python's Windows fstat may not expose the inode that path.stat returns.
+    # Compare actual kernel file IDs from open handles instead.
+    import msvcrt
+    from ctypes import wintypes
+
+    class FileInformation(ctypes.Structure):
+        _fields_ = [('attributes', wintypes.DWORD), ('creation', wintypes.FILETIME),
+                    ('access', wintypes.FILETIME), ('write', wintypes.FILETIME),
+                    ('volume', wintypes.DWORD), ('size_high', wintypes.DWORD),
+                    ('size_low', wintypes.DWORD), ('links', wintypes.DWORD),
+                    ('index_high', wintypes.DWORD), ('index_low', wintypes.DWORD)]
+
+    info = FileInformation()
+    get_info = ctypes.windll.kernel32.GetFileInformationByHandle
+    get_info.argtypes = [wintypes.HANDLE, ctypes.POINTER(FileInformation)]
+    get_info.restype = wintypes.BOOL
+    if not get_info(msvcrt.get_osfhandle(fd), ctypes.byref(info)):
+        raise ctypes.WinError()
+    return info.volume, info.index_high, info.index_low
+
+
 def checked_read(root: Path, relative):
+    root = root.resolve()
     path = root / local_relative_path(relative)
     # Reject symlinks (including ancestors); never follow a link outside the source.
     for ancestor in (path, *path.parents):
@@ -89,16 +112,30 @@ def checked_read(root: Path, relative):
     descriptor = os.open(path, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0))
     with os.fdopen(descriptor, 'rb') as stream:
         opened = os.fstat(stream.fileno())
-        if not stat.S_ISREG(opened.st_mode) or (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino):
+        if not stat.S_ISREG(opened.st_mode):
+            raise VersionError('Paikallinen lähde muuttui tarkistuksen aikana. Yritä uudelleen.')
+        if os.name == 'nt':
+            with open(path, 'rb') as check:
+                if _windows_file_identity(stream.fileno()) != _windows_file_identity(check.fileno()):
+                    raise VersionError('Paikallinen lähde muuttui tarkistuksen aikana. Yritä uudelleen.')
+        elif (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino):
             raise VersionError('Paikallinen lähde muuttui tarkistuksen aikana. Yritä uudelleen.')
         data = stream.read(32 * 1024 * 1024 + 1)
         after = os.fstat(stream.fileno())
-    if (before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (after.st_size, after.st_mtime_ns, after.st_ctime_ns) or len(data) != before.st_size:
+        if os.name == 'nt':
+            with open(path, 'rb') as check:
+                if _windows_file_identity(stream.fileno()) != _windows_file_identity(check.fileno()):
+                    raise VersionError('Paikallinen lähde muuttui tarkistuksen aikana. Yritä uudelleen.')
+    after_path = path.stat(follow_symlinks=False)
+    metadata = lambda value: (value.st_size, value.st_mtime_ns, value.st_ctime_ns)
+    if (metadata(before) != metadata(after_path) or metadata(opened) != metadata(after)
+            or len(data) != before.st_size):
         raise VersionError('Paikallinen lähde muuttui tarkistuksen aikana. Yritä uudelleen.')
     return data
 
 
 def local_inventory(root: Path):
+    root = root.resolve()
     paths = []
     def visit(directory):
         if directory.is_symlink():
