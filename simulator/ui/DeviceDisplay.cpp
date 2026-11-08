@@ -246,7 +246,7 @@ void drawLegacyDeviceDisplay(const core::DisplayModel& m,ImVec2 origin,ImVec2 si
         "Pulssin ikä  "+std::to_string(m.pulseDiagnosticAgeUs)+" µs",
         "Kalibrointi  "+std::to_string(m.pulseDiagnosticCalibration)+" mm/pulssi"};
       for(unsigned i=0;i<7;++i)c.text(lines[i],18,52+i*31,444,30,21,false);
-      c.footer("VASEN: PALAA   ALAS: NOLLAA   OIKEA: USB");break;
+      c.footer("VASEN: PALAA   ALAS: NOLLAA   USB EI KÄYTÖSSÄ");break;
     }
 #endif
     case core::Screen::Diagnostics: {

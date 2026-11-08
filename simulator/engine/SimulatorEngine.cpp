@@ -34,6 +34,9 @@ struct SimulatorEngine::Runtime {
   uint64_t pulses = 0;
   uint64_t previousPulseUs = 0;
   uint64_t lastPulseUs = 0;
+#if ASKOMPU_HAS_UPSTREAM_012_UI
+  input::PulseDiagnostics pulseDiagnostics;
+#endif
 };
 
 Command Command::speed(uint32_t milliKmh) {
@@ -100,6 +103,13 @@ void SimulatorEngine::advanceMicroseconds(uint64_t durationUs) {
     const bool pulse = state.wheel.advanceMicroseconds(delta);
     state.time.advanceMicroseconds(delta);
     if (pulse) {
+#if ASKOMPU_HAS_UPSTREAM_012_UI
+      const auto diagnostics = state.pulseDiagnostics.snapshot(0);
+      state.pulseDiagnostics.observe(static_cast<uint32_t>(state.time.microseconds()),
+                                    true, diagnostics.hasAccepted,
+                                    diagnostics.lastAcceptedUs);
+      state.pulseDiagnostics.delivered(1);
+#endif
       state.previousPulseUs = state.lastPulseUs;
       state.lastPulseUs = state.time.microseconds();
       ++state.pulses;
@@ -203,6 +213,15 @@ void SimulatorEngine::settle() {
 void SimulatorEngine::serviceSaves() {
   auto& app = runtime_->application;
   const bool saved = runtime_->savesSucceed;
+#if ASKOMPU_HAS_UPSTREAM_012_UI
+  if (app.takePulseDiagnosticsResetRequest()) runtime_->pulseDiagnostics.reset();
+  // A desktop has no physical pulse GPIO or firmware USB diagnostics port.
+  (void)app.takePulseDiagnosticsDumpRequest();
+  const auto diagnostics = runtime_->pulseDiagnostics.snapshot(0);
+  const auto nowUs = static_cast<uint32_t>(runtime_->time.microseconds());
+  app.setPulseDiagnostics(diagnostics,
+      diagnostics.hasAccepted ? nowUs - diagnostics.lastAcceptedUs : 0, 0, false);
+#endif
   uint32_t calibration = 0;
   if (app.takeCalibrationSaveRequest(calibration)) app.completeCalibrationSave(saved);
   domain::TextColor color;

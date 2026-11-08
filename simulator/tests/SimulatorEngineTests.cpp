@@ -703,6 +703,19 @@ void testInitialRouteAndResetTargets() {
 }
 }  // namespace
 
+#if ASKOMPU_HAS_UPSTREAM_012_UI
+void testSimulatedPulseDiagnostics() {
+  SimulatorEngine engine;
+  acceptTime(engine);
+  engine.setSpeedKmh(36);
+  engine.advanceMilliseconds(300);
+  const auto diagnostics = engine.displayModel().pulseDiagnostics;
+  CHECK(diagnostics.observed == 3 && diagnostics.accepted == 3);
+  CHECK(diagnostics.rejected == 0 && diagnostics.delivered == 3);
+  CHECK(diagnostics.acceptedIntervalUs == 100000);
+}
+#endif
+
 int main() {
   const std::vector<std::pair<const char*, std::function<void()>>> tests = {
       {"Simuloitu aika, vuorokausi ja millisekuntilaskurin kierto", testTime},
@@ -728,6 +741,9 @@ int main() {
       {"AT-ajastimet yhden mikrosekunnin askelilla", testAtTimingPartition},
       {"Ajomääräyksen ja näyttöasetusten tallennus muistissa", testRouteAndSettingsSaves},
       {"Passiivinen alkureitti ja tuotannon nollauskohteet", testInitialRouteAndResetTargets},
+#if ASKOMPU_HAS_UPSTREAM_012_UI
+      {"Simuloitujen pulssien diagnostiikka", testSimulatedPulseDiagnostics},
+#endif
   };
   unsigned failed = 0;
   for (const auto& test : tests) {

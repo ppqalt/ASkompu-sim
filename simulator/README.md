@@ -4,6 +4,8 @@ Native Finnish-language desktop simulator using the real ASkompu core.
 The 1.1.0 release is built against Mikky100/ASkompu 0.1.2, commit
 `427e4026ebc7c510558e847b01ac7bc98c4147bd`. The display is the simulator's
 independent preview, not pixel-identical firmware rendering.
+Pulse diagnostics count simulated pulses; physical GPIO and the device's USB
+diagnostics output are not simulated.
 See the [project overview](../README.md) for screenshots and downloads.
 
 ## Run a package

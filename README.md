@@ -10,6 +10,8 @@ button inputs. The application interface is in Finnish.
 The packaged simulator uses Mikky100's ASkompu 0.1.2 core at commit
 `427e4026ebc7c510558e847b01ac7bc98c4147bd`. Its display is a desktop preview,
 not an exact rendering of the firmware display.
+Pulse diagnostics show simulated pulse activity; physical GPIO and the device's
+USB diagnostics output are not simulated.
 
 ![Simulator with the physical device button layout](simulator/docs/images/simulator.png)
 
