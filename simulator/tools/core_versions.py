@@ -384,7 +384,8 @@ class Backend:
         return output.strip()
 
     def git(self, *arguments, cwd=None, worktree_config=False):
-        env = dict(os.environ, GIT_TERMINAL_PROMPT='0', GCM_INTERACTIVE='never', GIT_CONFIG_NOSYSTEM='1', GIT_OPTIONAL_LOCKS='0')
+        env = dict(os.environ, GIT_TERMINAL_PROMPT='0', GCM_INTERACTIVE='never',
+                   GIT_CONFIG_NOSYSTEM='0' if worktree_config else '1', GIT_OPTIONAL_LOCKS='0')
         autocrlf = [] if worktree_config else ['-c', 'core.autocrlf=false']
         return self.run(['git', *autocrlf, '-c', 'core.hooksPath=',
                          '-c', 'protocol.ext.allow=never', *arguments], cwd=cwd, timeout=180, env=env)

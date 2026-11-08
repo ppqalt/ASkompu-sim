@@ -467,7 +467,7 @@ sys.exit(cv.main(["doctor","--home",sys.argv[2],"--job",sys.argv[3]]))
             dirty = self.backend.inspect_local(source)
         self.assertEqual(dirty['sha'], head)
         self.assertEqual(dirty['dirty'], 1)
-        self.assertEqual(clean['dirty'], 0)
+        self.assertEqual(clean['dirty'], 0, 'Git status: ' + self.backend.git('status', '--porcelain', cwd=source, worktree_config=True))
         self.assertNotEqual(clean['fingerprint'], dirty['fingerprint'])
         self.assertEqual(dirty['source_kind'], 'local')
         self.assertEqual(dirty['local_path'], str(source.resolve()))
@@ -484,6 +484,17 @@ sys.exit(cv.main(["doctor","--home",sys.argv[2],"--job",sys.argv[3]]))
         git(source, 'add', '.')
         git(source, 'commit', '-m', 'CRLF source')
         self.assertEqual(self.backend.inspect_local(source)['dirty'], 0)
+
+    def test_local_status_respects_system_line_endings(self):
+        source = self.prepare_local()
+        system_config = self.root/'system-gitconfig'
+        system_config.write_text('[core]\n    autocrlf = true\n', encoding='utf-8')
+        with patch.dict(os.environ, {'GIT_CONFIG_SYSTEM': str(system_config)}):
+            target = source/'src/core/Clock.cpp'
+            target.write_bytes(b'// system CRLF\r\n')
+            git(source, 'add', '.')
+            git(source, 'commit', '-m', 'System CRLF source')
+            self.assertEqual(self.backend.inspect_local(source)['dirty'], 0)
 
     def test_local_capture_is_exact_and_omits_unrelated_builds_git_and_simulator(self):
         source = self.prepare_local()
