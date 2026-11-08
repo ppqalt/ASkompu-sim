@@ -133,11 +133,9 @@ def local_inventory(root: Path):
     return files
 
 
-def verify_snapshot(core: Path, manifest_path: Path):
-    """Verify both hashes and complete inventory before build/test/install."""
-    if core.is_symlink() or manifest_path.is_symlink() or manifest_path.resolve() != core.resolve() / SNAPSHOT_NAME:
-        raise VersionError('Tilannekuvan manifesti ei ole sen omassa juurihakemistossa.')
-    manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+def validate_snapshot_manifest(manifest):
+    if not isinstance(manifest, dict):
+        raise VersionError('Tuntematon paikallisen tilannekuvan muoto.')
     if manifest.get('manifest_version') != 1 or manifest.get('source_kind') != 'local':
         raise VersionError('Tuntematon paikallisen tilannekuvan muoto.')
     if (type(manifest.get('git')) is not int or manifest['git'] not in (0, 1) or
@@ -158,6 +156,16 @@ def verify_snapshot(core: Path, manifest_path: Path):
     paths = [f['path'] for f in expected]
     if paths != sorted(set(paths)) or source_fingerprint(expected) != manifest.get('fingerprint'):
         raise VersionError('Tilannekuvan manifesti ei vastaa lähdetiivistettä.')
+    return expected
+
+
+def verify_snapshot(core: Path, manifest_path: Path):
+    """Verify both hashes and complete inventory before build/test/install."""
+    if core.is_symlink() or manifest_path.is_symlink() or manifest_path.resolve() != core.resolve() / SNAPSHOT_NAME:
+        raise VersionError('Tilannekuvan manifesti ei ole sen omassa juurihakemistossa.')
+    manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+    expected = validate_snapshot_manifest(manifest)
+    paths = [f['path'] for f in expected]
     actual = local_inventory(core.resolve())
     all_paths = []
     for path in core.rglob('*'):
@@ -522,6 +530,7 @@ class Backend:
 
     def prepare_local_cache(self, bundle, snapshot, selected, profile, cmake_options):
         """Reuse only a verified simulator/source/profile combination, never the user tree."""
+        self.check_cancel()
         identity = {'local_path': selected['local_path'], 'profile': profile,
                     # ZIP directory timestamps change on rebuild; key the exact source contents.
                     'bundle_fingerprint': source_fingerprint(self.bundle_inventory(bundle)),
@@ -530,31 +539,119 @@ class Backend:
         key = hashlib.sha256(json.dumps(identity, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
         cache = self.home / 'local-cache' / key
         core, source = cache/'core', cache/'source'
+        if cache.is_symlink():
+            raise VersionError('Paikallisen rakennuksen välimuistin polku muuttui.')
         if cache.exists():
             if cache.is_symlink() or json.loads((cache/'identity.json').read_text()) != identity:
                 raise VersionError('Paikallisen rakennuksen välimuistin alkuperätiedot muuttuivat.')
+            self.recover_local_cache_update(cache, identity)
             previous = verify_snapshot(core, core/SNAPSHOT_NAME)
             previous_files = {f['path']: f for f in previous['files']}
+            self.verify_cached_bundle(bundle, source)
         else:
-            cache.mkdir(parents=True)
-            self.extract_bundle(bundle, source)
-            json_write(cache/'identity.json', identity)
-            core.mkdir()
-            previous_files = {}
+            # Publish the initial cache only after its source and core are complete.
+            cache.parent.mkdir(parents=True, exist_ok=True)
+            creating = cache.with_name('creating-' + key + '-' + uuid.uuid4().hex)
+            try:
+                creating.mkdir()
+                self.extract_bundle(bundle, creating/'source')
+                shutil.copytree(snapshot, creating/'core')
+                json_write(creating/'identity.json', identity)
+                verify_snapshot(creating/'core', creating/'core'/SNAPSHOT_NAME)
+                self.verify_cached_bundle(bundle, creating/'source')
+                self.check_cancel()
+                creating.rename(cache)
+                return core, source
+            finally:
+                if creating.exists():
+                    shutil.rmtree(creating)
         manifest = verify_snapshot(snapshot, snapshot/SNAPSHOT_NAME)
+        if previous == manifest:
+            return core, source
         current_files = {f['path']: f for f in manifest['files']}
-        for relative in previous_files.keys() - current_files.keys():
-            (core/relative).unlink()
-        for relative, record in current_files.items():
-            if previous_files.get(relative) == record:
-                continue  # Preserve mtime so CMake rebuilds only changed compilation units.
-            target = core/relative
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(checked_read(snapshot, relative))
-        json_write(core/SNAPSHOT_NAME, manifest)
-        verify_snapshot(core, core/SNAPSHOT_NAME)
-        self.verify_cached_bundle(bundle, source)
+        transaction = cache/('core-update-' + uuid.uuid4().hex)
+        staged = transaction/'next'
+        marker = cache/'core-update.json'
+        try:
+            # copy2 preserves unchanged mtimes. Build/dependency directories stay in place.
+            shutil.copytree(core, staged)
+            for relative in previous_files.keys() - current_files.keys():
+                self.check_cancel()
+                (staged/relative).unlink()
+            for relative, record in current_files.items():
+                self.check_cancel()
+                if previous_files.get(relative) == record:
+                    continue
+                target = staged/relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(checked_read(snapshot, relative))
+            json_write(staged/SNAPSHOT_NAME, manifest)
+            verify_snapshot(staged, staged/SNAPSHOT_NAME)
+            self.check_cancel()
+            json_write(marker, {'transaction': transaction.name, 'identity': identity,
+                               'previous_manifest_sha256': hashlib.sha256((core/SNAPSHOT_NAME).read_bytes()).hexdigest(),
+                               'next_manifest_sha256': hashlib.sha256((staged/SNAPSHOT_NAME).read_bytes()).hexdigest()})
+            core.rename(transaction/'previous')
+            staged.rename(core)
+            verify_snapshot(core, core/SNAPSHOT_NAME)
+            self.verify_cached_bundle(bundle, source)
+            self.check_cancel()
+            marker.unlink()
+        except BaseException:
+            if marker.exists():
+                # If recovery itself fails, retain the marker and backups for a safe retry.
+                self.recover_local_cache_update(cache, identity)
+            raise
+        finally:
+            if transaction.exists() and not marker.exists():
+                shutil.rmtree(transaction)
         return core, source
+
+    def recover_local_cache_update(self, cache, identity):
+        """Roll back only a fully identified interrupted directory swap; reject tampering."""
+        marker = cache/'core-update.json'
+        if marker.is_symlink():
+            raise VersionError('Paikallisen rakennuksen palautusmerkintä muuttui.')
+        if not marker.exists():
+            return
+        update = json.loads(marker.read_text(encoding='utf-8'))
+        name = update.get('transaction') if isinstance(update, dict) else None
+        if (not isinstance(name, str) or not re.fullmatch('core-update-[0-9a-f]{32}', name)
+                or update.get('identity') != identity
+                or any(not isinstance(update.get(k), str) or not re.fullmatch('[0-9a-f]{64}', update[k])
+                       for k in ('previous_manifest_sha256', 'next_manifest_sha256'))):
+            raise VersionError('Paikallisen rakennuksen palautusmerkintä ei ole kelvollinen.')
+        transaction = cache/name
+        if transaction.is_symlink() or not transaction.is_dir() or any(p.name not in ('previous', 'next', 'aborted') for p in transaction.iterdir()):
+            raise VersionError('Paikallisen rakennuksen palautushakemisto muuttui.')
+        previous_hash = update['previous_manifest_sha256']
+        next_hash = update['next_manifest_sha256']
+        found = {}
+        candidates = {'core': cache/'core', 'previous': transaction/'previous',
+                      'next': transaction/'next', 'aborted': transaction/'aborted'}
+        for role, path in candidates.items():
+            if not path.exists() and not path.is_symlink():
+                continue
+            manifest = verify_snapshot(path, path/SNAPSHOT_NAME)
+            digest = hashlib.sha256((path/SNAPSHOT_NAME).read_bytes()).hexdigest()
+            allowed = (previous_hash, next_hash) if role == 'core' else (previous_hash,) if role == 'previous' else (next_hash,)
+            if digest not in allowed or manifest['local_path'] != identity['local_path']:
+                raise VersionError('Keskeneräisen rakennuksen lähdetilannekuva muuttui; automaattinen palautus estetty.')
+            found[role] = digest
+        if 'previous' in found:
+            if 'core' in found:
+                if found['core'] != next_hash or 'aborted' in found:
+                    raise VersionError('Paikallisen rakennuksen palautustila on ristiriitainen.')
+                candidates['core'].rename(candidates['aborted'])
+            candidates['previous'].rename(candidates['core'])
+        elif found.get('core') != previous_hash:
+            raise VersionError('Keskeneräisen rakennuksen aiempaa varmennettua tilannekuvaa ei löydy.')
+        restored = verify_snapshot(candidates['core'], candidates['core']/SNAPSHOT_NAME)
+        if hashlib.sha256((candidates['core']/SNAPSHOT_NAME).read_bytes()).hexdigest() != previous_hash:
+            raise VersionError('Paikallisen rakennuksen palautus epäonnistui.')
+        marker.unlink()
+        shutil.rmtree(transaction)
+        self.publish('downloading', 'Keskeneräinen paikallinen lähdepäivitys palautettiin turvallisesti', recovered_fingerprint=restored['fingerprint'])
 
     def verify_cached_bundle(self, bundle, source):
         # Generated build/ contents are not simulator sources. Bundle members must remain exact.
@@ -639,13 +736,15 @@ class Backend:
         self.run(['ctest', '--preset', preset], cwd=simulator)
         verify()
         stage = root / 'app'
+        self.publish('installing', 'Asennetaan erillistä testattua ohjelmaa')
         self.run(['cmake', '--install', build, '--config', 'Release', '--component', 'Runtime', '--prefix', stage], cwd=simulator)
         verify()
         exe = stage / ('askompu-simulaattori.exe' if os.name == 'nt' else 'bin/askompu-simulaattori')
         environment = dict(os.environ, SDL_VIDEODRIVER='dummy')
+        self.publish('validating', 'Varmistetaan asennetun ohjelman versio, näyttöprofiili ja käynnistyminen')
         version = self.run([exe, '--versio'], cwd=root, env=environment, timeout=30)
         expected_worktree = ('paikallisia muutoksia' if selected.get('dirty') else 'puhdas') if selected.get('git', 1) else 'ei Git-tietoja'
-        expected = [f'ASkompu-ydin: {sha}', f'Ytimen työpuu: {expected_worktree}']
+        expected = [f'ASkompu-ydin: {sha}', f'Ytimen työpuu: {expected_worktree}', f'Näyttöprofiili: {profile}']
         if manifest_path:
             expected += ['Ytimen lähde: local', f'Paikallinen lähde: {selected["local_path"]}', f'ASkompu-lähteiden SHA-256: {selected["fingerprint"]}']
         if any(line not in version.splitlines() for line in expected):
@@ -656,24 +755,86 @@ class Backend:
         ready = dict(selected, profile=profile, source_kind='local' if local else 'github', artifact=artifact, executable=str(exe), binary_sha256=hashlib.sha256(exe.read_bytes()).hexdigest(), tested=True)
         json_write(root / 'ready.json', ready)
         json_write(self.home / 'latest-ready.json', ready)
-        self.publish('ready', 'ASkompu-ydin valmis', executable=str(exe), **selected)
+        self.publish('ready', 'ASkompu-ydin valmis', executable=str(exe), profile=profile, **selected)
         return ready
+
+    def validated_ready(self, artifact):
+        """One integrity gate for restored GUI readiness and forward launching."""
+        if not isinstance(artifact, str) or not re.fullmatch('[0-9a-f]{32}', artifact):
+            raise VersionError('Valmiin rakennuksen tunniste ei ole kelvollinen.')
+        root = self.home/'builds'/artifact
+        if root.is_symlink() or root.parent.is_symlink():
+            raise VersionError('Valmiin rakennuksen polku muuttui.')
+        ready = json.loads((root/'ready.json').read_text(encoding='utf-8'))
+        if (not isinstance(ready, dict) or ready.get('artifact') != artifact or ready.get('tested') is not True
+                or ready.get('profile') not in ('320x170', '480x320')
+                or ready.get('source_kind') not in ('local', 'github')
+                or not isinstance(ready.get('sha'), str)
+                or not (SHA.fullmatch(ready['sha']) or ready['sha'] == 'tuntematon' and ready['source_kind'] == 'local')
+                or not isinstance(ready.get('date'), str)
+                or not isinstance(ready.get('binary_sha256'), str) or not re.fullmatch('[0-9a-f]{64}', ready['binary_sha256'])
+                or not isinstance(ready.get('executable'), str)):
+            raise VersionError('Valmiin rakennuksen varmennustiedot puuttuvat tai ovat muuttuneet. Rakenna versio uudelleen.')
+        if ready['source_kind'] == 'local' and (not isinstance(ready.get('local_path'), str) or not os.path.isabs(ready['local_path'])
+                or not isinstance(ready.get('fingerprint'), str) or not re.fullmatch('[0-9a-f]{64}', ready['fingerprint'])):
+            raise VersionError('Valmiin paikallisen rakennuksen lähdetiedot eivät ole kelvolliset.')
+        exe = Path(ready['executable'])
+        if (not exe.is_absolute() or not exe.resolve().is_relative_to(root.resolve()) or not exe.is_file()
+                or hashlib.sha256(exe.read_bytes()).hexdigest() != ready['binary_sha256']):
+            raise VersionError('Valmis ohjelma puuttuu tai on muuttunut. Rakenna versio uudelleen.')
+        return ready
+
+    def validated_previous(self):
+        history = json.loads((self.home/'history.json').read_text(encoding='utf-8'))
+        if (not isinstance(history, dict) or not isinstance(history.get('previous'), str)
+                or not isinstance(history.get('previous_sha256'), str)
+                or not re.fullmatch('[0-9a-f]{64}', history['previous_sha256'])):
+            raise VersionError('Edellisen ohjelman eheystieto puuttuu. Vanhaa palautustietoa ei voi käyttää turvallisesti.')
+        exe = Path(history['previous'])
+        if not exe.is_absolute() or not exe.is_file() or hashlib.sha256(exe.read_bytes()).hexdigest() != history['previous_sha256']:
+            raise VersionError('Edellinen ohjelma puuttuu tai on muuttunut. Palautus estetty.')
+        return exe, history['previous_sha256']
+
+    def doctor(self, bundle):
+        missing = self.requirements(bundle)
+        ready, previous = {}, ''
+        ready_warning, previous_warning = '', ''
+        if (self.home/'latest-ready.json').exists():
+            try:
+                latest = json.loads((self.home/'latest-ready.json').read_text(encoding='utf-8'))
+                if not isinstance(latest, dict):
+                    raise VersionError('Viimeisimmän rakennuksen tiedot eivät ole kelvolliset.')
+                ready = self.validated_ready(latest.get('artifact'))
+                if ready != latest:
+                    raise VersionError('Viimeisimmän rakennuksen tiedot eivät vastaa varmennettua ohjelmaa.')
+            except (VersionError, OSError, ValueError) as error:
+                ready = {}
+                ready_warning = 'Aiempi valmis rakennus ei ole käytettävissä: ' + str(error)
+        if (self.home/'history.json').exists():
+            try:
+                exe, _ = self.validated_previous()
+                previous = str(exe)
+            except (VersionError, OSError, ValueError) as error:
+                previous_warning = str(error)
+        self.publish('done', 'Rakennustyökalut löytyivät' if not missing else 'Puuttuvat työkalut: ' + missing,
+                     requirements_ok=int(not missing), previous=previous, previous_warning=previous_warning,
+                     artifact=ready.get('artifact', ''), ready_exists=int(bool(ready)), ready_warning=ready_warning,
+                     ready_sha=ready.get('sha', ''), ready_tag=ready.get('tag', ''), ready_date=ready.get('date', ''),
+                     ready_profile=ready.get('profile', ''), ready_executable=ready.get('executable', ''),
+                     ready_source_kind=ready.get('source_kind', ''), ready_local_path=ready.get('local_path', ''),
+                     ready_fingerprint=ready.get('fingerprint', ''), ready_dirty=ready.get('dirty', 0))
 
     def launch(self, artifact, current: Path, rollback=False):
         history_path = self.home / 'history.json'
         if rollback:
-            history = json.loads(history_path.read_text(encoding='utf-8'))
-            exe = Path(history['previous'])
+            exe, launched_digest = self.validated_previous()
         else:
-            if not re.fullmatch('[0-9a-f]{32}', artifact or ''):
-                raise VersionError('Valmiin rakennuksen tunniste puuttuu.')
-            root = self.home / 'builds' / artifact
-            ready = json.loads((root / 'ready.json').read_text(encoding='utf-8'))
+            ready = self.validated_ready(artifact)
             exe = Path(ready['executable'])
-            if not ready.get('tested') or not exe.resolve().is_relative_to(root.resolve()) or hashlib.sha256(exe.read_bytes()).hexdigest() != ready['binary_sha256']:
-                raise VersionError('Valmis rakennus on muuttunut tai testaamatta. Käynnistys estetty.')
+            launched_digest = ready['binary_sha256']
         if not exe.is_file() or not current.is_file() or exe.resolve() == current.resolve():
             raise VersionError('Käynnistettävää tai edellistä ohjelmaa ei löydy.')
+        current_digest = hashlib.sha256(current.read_bytes()).hexdigest()
         self.publish('launching', 'Käynnistetään uutta simulaattoria; nykyinen pysyy vielä auki')
         ready_file = self.job / ('startup-' + uuid.uuid4().hex)
         env = dict(os.environ)
@@ -693,9 +854,11 @@ class Backend:
                     raise VersionError('Uusi ikkuna ei käynnistynyt. Nykyinen ohjelma säilyy käytössä; katso käynnistysloki.')
                 time.sleep(.08)
             time.sleep(.3)
+            self.check_cancel()
             if process.poll() is not None:
                 raise VersionError('Uusi ohjelma sulkeutui käynnistyksessä. Nykyinen ohjelma säilyy käytössä.')
-            json_write(history_path, {'current': str(exe.resolve()), 'previous': str(current.resolve()), 'pid': process.pid})
+            json_write(history_path, {'current': str(exe.resolve()), 'current_sha256': launched_digest,
+                                      'previous': str(current.resolve()), 'previous_sha256': current_digest, 'pid': process.pid})
             self.publish('launched', 'Uusi simulaattori on käynnissä. Aloitetaan uusi sessio.', executable=str(exe))
         except BaseException:
             if process.poll() is None:
@@ -704,6 +867,7 @@ class Backend:
                     process.wait(timeout=3)
                 except subprocess.TimeoutExpired:
                     process.kill()
+                    process.wait()
             raise
         finally:
             ready_file.unlink(missing_ok=True)
@@ -737,21 +901,7 @@ def main(argv=None):
             if args.local and args.operation not in ('inspect-local', 'build'):
                 raise VersionError('--local on käytössä vain inspect-local- ja build-toiminnoissa.')
             if args.operation == 'doctor':
-                missing = backend.requirements(args.bundle)
-                previous = ''
-                if (backend.home / 'history.json').exists():
-                    previous = json.loads((backend.home / 'history.json').read_text(encoding='utf-8')).get('previous', '')
-                latest = ''
-                if (backend.home / 'latest-ready.json').exists():
-                    latest = json.loads((backend.home / 'latest-ready.json').read_text(encoding='utf-8')).get('artifact', '')
-                ready_info = {}
-                if latest:
-                    ready_info = json.loads((backend.home / 'latest-ready.json').read_text(encoding='utf-8'))
-                backend.publish('done', 'Rakennustyökalut löytyivät' if not missing else 'Puuttuvat työkalut: ' + missing,
-                                requirements_ok=int(not missing), previous=previous, artifact=latest,
-                                ready_sha=ready_info.get('sha', ''), ready_tag=ready_info.get('tag', ''),
-                                ready_source_kind=ready_info.get('source_kind', ''), ready_local_path=ready_info.get('local_path', ''),
-                                ready_fingerprint=ready_info.get('fingerprint', ''), ready_dirty=ready_info.get('dirty', 0))
+                backend.doctor(args.bundle)
             elif args.operation == 'list':
                 backend.versions()
             elif args.operation == 'resolve':

@@ -1,4 +1,4 @@
-# ASkompu Core / Ytimen versio — simulaattori 1.0.0
+# ASkompu Core / Ytimen versio — simulaattori 1.1.0
 
 Valitsin löytyy yläpalkin **ASkompu-versio** -painikkeesta. Se keskeyttää
 nykyisen simulaatioajon; voit palata Simulaattori-painikkeella ja jatkaa sitä.
@@ -96,15 +96,27 @@ tehdystä, vielä pushaamattomasta simulaattoriversiosta. Lähdepaketti kopioida
 uuteen rakennukseen, joten käyttäjän työpuuta ei muokata.
 
 Backend rakentaa, ajaa CTestin, asentaa erilliseen `app`-hakemistoon,
-tarkistaa uuden ohjelman ilmoittaman SHA:n ja ajaa SDL-dummy-GUI-testin.
+tarkistaa uuden ohjelman ilmoittaman SHA:n, paikallisen lähteen tiivisteen
+ja täsmälleen pyydetyn näyttöprofiilin sekä ajaa SDL-dummy-GUI-testin.
 Vasta sitten se kirjoittaa valmiin rakennuksen tiedot ja EXEn SHA-256:n.
 Käynnistyksessä tiiviste tarkistetaan uudelleen. Windows-asennus käyttää
 edelleen staattisen runtime-paketin DLL-auditointia.
 
+Asennus ja asennetun ohjelman varmennus ovat omat näkyvät vaiheensa testien
+jälkeen. Työkalutarkistus palauttaa aiemman valmiin rakennuksen vain, jos
+rakennuskohtainen `ready.json`, sen testimerkintä, SHA/profiili/lähdetiedot,
+ohjelman hallittu polku ja binääritiiviste täsmäävät. Poistettu tai muuttunut
+rakennus ei jää näkyviin valmiina. Virheellinen rakennus- tai palautushistoria
+näytetään varoituksena; se ei estä toimivien rakennustyökalujen käyttämistä.
+
 Backend käynnistää erillisen EXEn. Uusi ohjelma kirjoittaa yksilöllisen
 kuittauksen ensimmäisen onnistuneesti piirretyn ruudun jälkeen. Vasta tämän
 jälkeen GUI sulkee vanhan ikkunan. Puuttuva kuittaus, prosessin virhe tai
-muuttunut EXE estää vaihdon. Edellisen ohjelman polku säilyy history.json:ssa.
+muuttunut EXE estää vaihdon. Peruutus tarkistetaan myös ensimmäisen ruudun
+kuittauksen jälkeisen vakausodotuksen jälkeen, ennen käynnistyshistorian
+muuttamista. `history.json` säilyttää edellisen ohjelman polun ja SHA-256:n.
+Myös takaisin vaihtaminen varmistaa tiivisteen. Vanha palautushistoria ilman
+binääritiivistettä tai myöhemmin muuttunut ohjelma hylätään turvallisesti.
 CLI-käynnistys raportoi onnistumisen, mutta ei sulje käyttäjän muita ikkunoita.
 
 ## Paikallisen ASkompun kehittäminen
@@ -160,6 +172,16 @@ käännös voi olla inkrementaalinen. ZIP-aikaleimat eivät vaihda sisältöavai
 Kaikki käännös-, testi-, asennus- ja käynnistystarkistukset suoritetaan
 jokaisella kierroksella. Lähdevälimuistin muutokset hylätään, eikä tulosta
 hyväksytä aiemman testituloksen perusteella.
+
+Lähdepäivitys valmistellaan erillisessä hakemistossa ja tarkistetaan ennen
+käytössä olevan välimuistikopion vaihtamista. Muuttumattomien lähteiden
+aikaleimat säilyvät myös tässä kopiossa. Vaihto käyttää merkittyä
+hakemistotransaktiota ja pitää aiemman varmennetun kopion, kunnes uusi on
+hyväksytty. Kirjoitusvirhe tai peruutus palauttaa aiemman kopion. Jos prosessi
+katkeaa hakemistovaihdon välissä, seuraava yritys palauttaa vain tunnistetun
+transaktion täsmällisiin manifestitiivisteisiin vastaavan kopion. Poikkeavat
+sisällöt, muuttuneet palautusmerkinnät ja merkitsemättömän välimuistin
+muutokset hylätään; niitä ei korjata hiljaisesti luotetuiksi lähteiksi.
 
 Hyväksytty ohjelma asennetaan aina omaan rakennuskohtaiseen `app`-hakemistoon,
 ja alkuperäinen tilannekuva säilyy sen rinnalla. Aiempi toimiva ohjelma ja

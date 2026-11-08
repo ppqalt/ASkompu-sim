@@ -3,6 +3,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import signal
 import subprocess
 import sys
 import tempfile
@@ -125,6 +126,39 @@ class VersionsTest(unittest.TestCase):
         timer.join()
         self.assertLess(time.monotonic()-started, 5)
 
+    @unittest.skipIf(os.name == 'nt', 'POSIX SIGINT/process-group regression')
+    def test_cli_sigint_cancels_child_and_removes_workspace_lock(self):
+        job = self.root/'signal-job'
+        child_pid = job/'child.pid'
+        code = '''import importlib.util,sys
+from pathlib import Path
+spec=importlib.util.spec_from_file_location("cv",sys.argv[1]);cv=importlib.util.module_from_spec(spec);spec.loader.exec_module(cv)
+def slow_requirements(self,bundle):
+    script="import os,time;from pathlib import Path;Path("+repr(str(self.job/"child.pid"))+").write_text(str(os.getpid()));time.sleep(60)"
+    self.run([sys.executable,"-c",script])
+    return ""
+cv.Backend.requirements=slow_requirements
+sys.exit(cv.main(["doctor","--home",sys.argv[2],"--job",sys.argv[3]]))
+'''
+        process = subprocess.Popen([sys.executable, '-c', code, str(SCRIPT), str(self.backend.home), str(job)],
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            deadline = time.monotonic()+5
+            while not child_pid.exists() and process.poll() is None and time.monotonic() < deadline:
+                time.sleep(.02)
+            self.assertTrue(child_pid.exists())
+            pid = int(child_pid.read_text())
+            process.send_signal(signal.SIGINT)
+            output, error = process.communicate(timeout=8)
+            self.assertEqual(process.returncode, 2, output+error)
+            self.assertEqual(json.loads((job/'state.json').read_text())['phase'], 'cancelled')
+            self.assertFalse((self.backend.home/'operation.lock').exists())
+            self.assertFalse(cv.alive(pid))
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+
     def test_timeout_fails_instead_of_hanging(self):
         with self.assertRaises(cv.VersionError):
             self.backend.run([sys.executable, '-c', 'import time; time.sleep(60)'], timeout=.2)
@@ -138,7 +172,7 @@ class VersionsTest(unittest.TestCase):
         with self.assertRaises(cv.VersionError):
             self.backend.verify_checkout(clone, self.new)
 
-    def fake_toolchain(self, sha, fail=None, wrong_version=False):
+    def fake_toolchain(self, sha, fail=None, wrong_version=False, profile='480x320'):
         """Vain CMake/CTest on korvattu. Git ja SHA-lukitus ovat todellisia."""
         real_run = self.backend.run
         phases, commands = [], []
@@ -162,7 +196,7 @@ class VersionsTest(unittest.TestCase):
                 app = Path(command[-1]);exe = app/('askompu-simulaattori.exe' if os.name=='nt' else 'bin/askompu-simulaattori')
                 exe.parent.mkdir(parents=True);exe.write_bytes(b'fixture executable')
             if '--versio' in command:
-                return f'ASkompu-ydin: {"0"*40 if wrong_version else sha}\nYtimen työpuu: puhdas'
+                return f'ASkompu-ydin: {"0"*40 if wrong_version else sha}\nYtimen työpuu: puhdas\nNäyttöprofiili: {profile}'
             return ''
         return phases, commands, patch.object(self.backend, 'run', run), patch.object(self.backend, 'publish', publish)
 
@@ -172,7 +206,7 @@ class VersionsTest(unittest.TestCase):
         with patch.object(self.backend, 'requirements', return_value=''), run_patch, publish_patch:
             ready = self.backend.build(self.old, self.bundle)
         self.assertEqual(ready['sha'], self.old)
-        self.assertEqual(phases, ['listing','downloading','configuring','building','testing','ready'])
+        self.assertEqual(phases, ['listing','downloading','configuring','building','testing','installing','validating','ready'])
         self.assertTrue(any(command[:2]==['ctest','--preset'] for command in commands))
         self.assertEqual(previous.read_text(), 'working')
         self.assertNotEqual(git(self.repo,'rev-parse','HEAD'), self.old)
@@ -188,6 +222,24 @@ class VersionsTest(unittest.TestCase):
                 self.assertNotIn('ready',phases)
         self.assertFalse((self.backend.home/'latest-ready.json').exists())
 
+    def test_wrong_or_missing_installed_profile_rejects_ready_and_preserves_previous(self):
+        previous = {'artifact': 'a'*32, 'unchanged': True}
+        cv.json_write(self.backend.home/'latest-ready.json', previous)
+        for actual in ('480x320', None):
+            phases, _, run_patch, publish_patch = self.fake_toolchain(self.new, profile=actual)
+            fake_run = run_patch.new
+            def run(command, **kwargs):
+                output = fake_run(command, **kwargs)
+                if '--versio' in command and actual is None:
+                    return '\n'.join(line for line in output.splitlines() if not line.startswith('Näyttöprofiili:'))
+                return output
+            with self.subTest(actual=actual), patch.object(self.backend,'requirements',return_value=''), patch.object(self.backend,'run',run), publish_patch:
+                with self.assertRaises(cv.VersionError):
+                    self.backend.build(self.new, self.bundle, profile='320x170')
+            self.assertIn('validating', phases)
+            self.assertNotIn('ready', phases)
+            self.assertEqual(json.loads((self.backend.home/'latest-ready.json').read_text()), previous)
+
     def test_source_bundle_cannot_escape_workspace(self):
         with zipfile.ZipFile(self.bundle, 'w') as z:
             z.writestr('../../outside.txt', 'invalid')
@@ -199,7 +251,7 @@ class VersionsTest(unittest.TestCase):
     def test_launch_rejects_modified_or_untested_executable(self):
         artifact='a'*32;root=self.backend.home/'builds'/artifact
         root.mkdir(parents=True);exe=root/'bad.exe';exe.write_bytes(b'changed')
-        cv.json_write(root/'ready.json', {'executable':str(exe),'tested':True,'binary_sha256':'0'*64})
+        cv.json_write(root/'ready.json', self.ready_record(artifact, exe, binary_sha256='0'*64))
         with self.assertRaises(cv.VersionError):
             self.backend.launch(artifact,Path(sys.executable))
         self.assertFalse((self.backend.home/'history.json').exists())
@@ -234,7 +286,7 @@ class VersionsTest(unittest.TestCase):
         subprocess.run(configure,check=True,capture_output=True)
         subprocess.run(['cmake','--build',str(root/'build'),'--config','Release'],check=True,capture_output=True)
         exe=root/'build'/('Release/failure.exe' if os.name=='nt' else 'failure')
-        cv.json_write(root/'ready.json',{'executable':str(exe),'tested':True,'binary_sha256':cv.hashlib.sha256(exe.read_bytes()).hexdigest()})
+        cv.json_write(root/'ready.json', self.ready_record(artifact, exe))
         history={'previous':'unchanged','current':'also unchanged'}
         cv.json_write(self.backend.home/'history.json',history)
         with self.assertRaises(cv.VersionError):
@@ -245,6 +297,148 @@ class VersionsTest(unittest.TestCase):
         result=cv.main(['build','--home',str(self.backend.home),'--job',str(self.backend.job),'--cmake-option=-DASKOMPU_CORE_ROOT=/wrong'])
         self.assertEqual(result,1)
         self.assertEqual(json.loads((self.backend.job/'state.json').read_text())['phase'],'failed')
+
+    def ready_record(self, artifact, exe, **changes):
+        record = {'artifact': artifact, 'executable': str(exe), 'tested': True,
+                  'binary_sha256': cv.hashlib.sha256(exe.read_bytes()).hexdigest(), 'profile': '480x320',
+                  'source_kind': 'github', 'sha': self.new, 'date': '2026-10-12T12:00:00+03:00', 'tag': ''}
+        record.update(changes)
+        return record
+
+    def prepare_ready(self, artifact='c'*32, **changes):
+        root = self.backend.home/'builds'/artifact
+        root.mkdir(parents=True, exist_ok=True)
+        exe = root/'app.exe'
+        exe.write_bytes(b'tested executable fixture')
+        record = self.ready_record(artifact, exe, **changes)
+        cv.json_write(root/'ready.json', record)
+        return record
+
+    def test_doctor_restores_only_integrity_checked_ready_and_previous(self):
+        ready = self.prepare_ready(profile='320x170')
+        cv.json_write(self.backend.home/'latest-ready.json', ready)
+        previous = self.root/'previous.exe'
+        previous.write_bytes(b'previous tested process')
+        cv.json_write(self.backend.home/'history.json', {'previous': str(previous),
+                      'previous_sha256': cv.hashlib.sha256(previous.read_bytes()).hexdigest()})
+        with patch.object(self.backend, 'requirements', return_value=''):
+            self.backend.doctor(self.bundle)
+        self.assertEqual(self.backend.state['artifact'], ready['artifact'])
+        self.assertEqual(self.backend.state['ready_exists'], 1)
+        self.assertEqual(self.backend.state['ready_profile'], '320x170')
+        self.assertEqual(self.backend.state['ready_date'], ready['date'])
+        self.assertEqual(self.backend.state['ready_executable'], ready['executable'])
+        self.assertEqual(self.backend.state['previous'], str(previous))
+        self.assertEqual(self.backend.state['ready_warning'], '')
+        previous.write_bytes(b'previous program changed')
+        with patch.object(self.backend, 'requirements', return_value=''):
+            self.backend.doctor(self.bundle)
+        self.assertEqual(self.backend.state['previous'], '')
+        self.assertIn('muuttunut', self.backend.state['previous_warning'])
+        self.assertEqual(self.backend.state['artifact'], ready['artifact'])
+        self.assertEqual(self.backend.state['requirements_ok'], 1)
+
+    def test_doctor_stale_corrupt_ready_and_history_do_not_disable_tools(self):
+        for mode in ('missing', 'changed', 'latest-json', 'ready-json', 'latest-mismatch', 'legacy-history', 'history-json'):
+            ready = self.prepare_ready()
+            cv.json_write(self.backend.home/'latest-ready.json', ready)
+            cv.json_write(self.backend.home/'history.json', {'previous': '/missing/previous', 'previous_sha256': '0'*64})
+            if mode == 'missing':
+                Path(ready['executable']).unlink()
+            elif mode == 'changed':
+                Path(ready['executable']).write_bytes(b'modified after testing')
+            elif mode == 'latest-json':
+                (self.backend.home/'latest-ready.json').write_text('{invalid JSON')
+            elif mode == 'ready-json':
+                (self.backend.home/'builds'/ready['artifact']/'ready.json').write_text('[]')
+            elif mode == 'latest-mismatch':
+                altered = dict(ready, profile='320x170')
+                cv.json_write(self.backend.home/'latest-ready.json', altered)
+            elif mode == 'legacy-history':
+                cv.json_write(self.backend.home/'history.json', {'previous': ready['executable']})
+            else:
+                (self.backend.home/'history.json').write_text('{invalid JSON')
+            with self.subTest(mode=mode), patch.object(self.backend, 'requirements', return_value=''):
+                self.backend.doctor(self.bundle)
+                self.assertEqual(self.backend.state['requirements_ok'], 1)
+                self.assertEqual(self.backend.state['phase'], 'done')
+                self.assertEqual(self.backend.state['previous'], '')
+                self.assertTrue(self.backend.state['previous_warning'])
+                if mode not in ('legacy-history', 'history-json'):
+                    self.assertEqual(self.backend.state['artifact'], '')
+                    self.assertEqual(self.backend.state['ready_exists'], 0)
+                    self.assertTrue(self.backend.state['ready_warning'])
+
+    def test_ready_validation_rejects_bad_formats_untested_and_external_executable(self):
+        ready = self.prepare_ready()
+        external = self.root/'outside.exe'
+        external.write_bytes(Path(ready['executable']).read_bytes())
+        changes = ({'tested': False}, {'tested': 1}, {'artifact': 'wrong'}, {'sha': 'short'},
+                   {'profile': '800x600'}, {'binary_sha256': 'bad'}, {'source_kind': 'other'},
+                   {'executable': str(external)}, {'executable': '../outside.exe'},
+                   {'source_kind': 'local', 'fingerprint': 'bad', 'local_path': str(self.repo)})
+        for change in changes:
+            with self.subTest(change=change), patch.object(cv.subprocess, 'Popen') as spawn:
+                cv.json_write(self.backend.home/'builds'/ready['artifact']/'ready.json', dict(ready, **change))
+                with self.assertRaises(cv.VersionError):
+                    self.backend.launch(ready['artifact'], Path(sys.executable))
+                spawn.assert_not_called()
+
+    def fake_successful_startup(self, children):
+        class Child:
+            pid = 999999
+            def __init__(self, command, **kwargs):
+                self.terminated = False
+                children.append(self)
+                Path(command[command.index('--startup-ready')+1]).touch()
+            def poll(self):
+                return 0 if self.terminated else None
+            def terminate(self):
+                self.terminated = True
+            def wait(self, timeout=None):
+                return 0
+        return Child
+
+    def test_launch_records_digest_and_rollback_rejects_modified_or_legacy_previous(self):
+        ready = self.prepare_ready()
+        current = self.root/'current.exe'
+        current.write_bytes(b'currently running fixture')
+        children = []
+        with patch.object(cv.subprocess, 'Popen', self.fake_successful_startup(children)), patch.object(cv.time, 'sleep'):
+            self.backend.launch(ready['artifact'], current)
+        history = json.loads((self.backend.home/'history.json').read_text())
+        self.assertEqual(history['previous_sha256'], cv.hashlib.sha256(current.read_bytes()).hexdigest())
+        self.assertEqual(history['current_sha256'], ready['binary_sha256'])
+        with patch.object(cv.subprocess, 'Popen', self.fake_successful_startup(children)), patch.object(cv.time, 'sleep'):
+            self.backend.launch(None, Path(ready['executable']), rollback=True)
+        # Restore the original transition, then mutate its previous binary.
+        cv.json_write(self.backend.home/'history.json', history)
+        current.write_bytes(b'changed after use')
+        with patch.object(cv.subprocess, 'Popen') as spawn, self.assertRaises(cv.VersionError):
+            self.backend.launch(None, Path(ready['executable']), rollback=True)
+        spawn.assert_not_called()
+        self.assertEqual(json.loads((self.backend.home/'history.json').read_text()), history)
+        history.pop('previous_sha256')
+        cv.json_write(self.backend.home/'history.json', history)
+        with patch.object(cv.subprocess, 'Popen') as spawn, self.assertRaises(cv.VersionError):
+            self.backend.launch(None, Path(ready['executable']), rollback=True)
+        spawn.assert_not_called()
+
+    def test_cancellation_after_startup_ack_terminates_new_process_preserves_history(self):
+        ready = self.prepare_ready()
+        current = self.root/'current.exe'
+        current.write_bytes(b'current fixture')
+        history = {'previous': 'untouched', 'current': 'untouched'}
+        cv.json_write(self.backend.home/'history.json', history)
+        children = []
+        def late_cancel(seconds):
+            if seconds == .3:
+                self.backend.cancelled = True
+        with patch.object(cv.subprocess, 'Popen', self.fake_successful_startup(children)), patch.object(cv.time, 'sleep', late_cancel), self.assertRaises(cv.Cancelled):
+            self.backend.launch(ready['artifact'], current)
+        self.assertTrue(children[0].terminated)
+        self.assertEqual(json.loads((self.backend.home/'history.json').read_text()), history)
+        self.assertNotEqual(self.backend.state['phase'], 'launched')
 
     def prepare_local(self, commit=True):
         for relative in cv.LOCAL_REQUIRED:
@@ -420,6 +614,7 @@ class VersionsTest(unittest.TestCase):
                 core = Path(next(arg.split('=',1)[1] for arg in command if str(arg).startswith('-DASKOMPU_CORE_ROOT=')))
                 manifest = Path(next(arg.split('=',1)[1] for arg in command if str(arg).startswith('-DASKOMPU_CORE_SNAPSHOT=')))
                 captured.update(cv.verify_snapshot(core, manifest))
+                captured['compiled_profile'] = next(arg.split('=',1)[1] for arg in command if str(arg).startswith('-DASKOMPU_DISPLAY_PROFILE='))
                 self.assertEqual((core/'src/core/Clock.cpp').read_text(), '// local source fixture\n')
                 (source/'src/core/Clock.cpp').write_text('// changed after immutable capture\n')
                 if tamper:
@@ -432,7 +627,7 @@ class VersionsTest(unittest.TestCase):
             if '--versio' in command:
                 state = 'paikallisia muutoksia' if captured['dirty'] else 'puhdas'
                 fingerprint = '0'*64 if wrong_version else captured['fingerprint']
-                return f'ASkompu-ydin: {captured["sha"]}\nYtimen työpuu: {state}\nYtimen lähde: local\nPaikallinen lähde: {source}\nASkompu-lähteiden SHA-256: {fingerprint}'
+                return f'ASkompu-ydin: {captured["sha"]}\nYtimen työpuu: {state}\nYtimen lähde: local\nPaikallinen lähde: {source}\nASkompu-lähteiden SHA-256: {fingerprint}\nNäyttöprofiili: {captured["compiled_profile"]}'
             return ''
         return commands, captured, patch.object(self.backend, 'run', run)
 
@@ -504,6 +699,104 @@ class VersionsTest(unittest.TestCase):
         (cached_core/'src/core/Clock.cpp').write_text('// unexpected change')
         with self.assertRaises(cv.VersionError):
             self.backend.prepare_local_cache(self.bundle, self.root/'snapshot', selected, '480x320', ())
+
+    def test_cache_write_failure_and_cancellation_leave_previous_core_retryable(self):
+        source = self.prepare_local()
+        selected, _ = self.backend.capture_local(source, self.root/'old-snapshot')
+        cached_core, _ = self.backend.prepare_local_cache(self.bundle, self.root/'old-snapshot', selected, '480x320', ())
+        stable_time = (cached_core/'src/core/ApplicationCore.h').stat().st_mtime_ns
+        (source/'src/core/ApplicationCore.cpp').write_text('// changed A')
+        (source/'src/core/Clock.cpp').write_text('// changed B')
+        updated, _ = self.backend.capture_local(source, self.root/'new-snapshot')
+        original_write = Path.write_bytes
+        for mode in ('write-error', 'cancel'):
+            def fail_during_stage(path, data):
+                if 'core-update-' in str(path) and path.name == 'Clock.cpp':
+                    if mode == 'write-error':
+                        raise OSError('simulated disk write failure')
+                    self.backend.cancelled = True
+                return original_write(path, data)
+            with self.subTest(mode=mode), patch.object(Path, 'write_bytes', fail_during_stage):
+                with self.assertRaises(OSError if mode == 'write-error' else cv.Cancelled):
+                    self.backend.prepare_local_cache(self.bundle, self.root/'new-snapshot', updated, '480x320', ())
+            self.backend.cancelled = False
+            self.assertEqual(cv.verify_snapshot(cached_core, cached_core/cv.SNAPSHOT_NAME)['fingerprint'], selected['fingerprint'])
+            self.assertFalse((cached_core.parent/'core-update.json').exists())
+            self.assertEqual((cached_core/'src/core/ApplicationCore.h').stat().st_mtime_ns, stable_time)
+        self.backend.prepare_local_cache(self.bundle, self.root/'new-snapshot', updated, '480x320', ())
+        self.assertEqual(cv.verify_snapshot(cached_core, cached_core/cv.SNAPSHOT_NAME)['fingerprint'], updated['fingerprint'])
+        self.assertEqual((cached_core/'src/core/ApplicationCore.h').stat().st_mtime_ns, stable_time)
+
+    def test_cache_rename_failure_rolls_back_exact_previous_snapshot(self):
+        source = self.prepare_local()
+        old, _ = self.backend.capture_local(source, self.root/'old-snapshot')
+        core, _ = self.backend.prepare_local_cache(self.bundle, self.root/'old-snapshot', old, '480x320', ())
+        (source/'src/core/Clock.cpp').write_text('// edited feature')
+        updated, _ = self.backend.capture_local(source, self.root/'new-snapshot')
+        original_rename = Path.rename
+        def fail_after_previous_move(path, destination):
+            result = original_rename(path, destination)
+            if path == core and Path(destination).name == 'previous':
+                raise OSError('simulated directory-swap failure')
+            return result
+        with patch.object(Path, 'rename', fail_after_previous_move), self.assertRaises(OSError):
+            self.backend.prepare_local_cache(self.bundle, self.root/'new-snapshot', updated, '480x320', ())
+        self.assertEqual(cv.verify_snapshot(core, core/cv.SNAPSHOT_NAME)['fingerprint'], old['fingerprint'])
+        self.assertFalse((core.parent/'core-update.json').exists())
+        self.backend.prepare_local_cache(self.bundle, self.root/'new-snapshot', updated, '480x320', ())
+        self.assertEqual(cv.verify_snapshot(core, core/cv.SNAPSHOT_NAME)['fingerprint'], updated['fingerprint'])
+
+    def interrupted_cache_update(self, backend, snapshot, selected, stop_after='previous'):
+        # os._exit models a hard interruption that cannot run Python finally/rollback.
+        code = '''import importlib.util,json,os,sys
+from pathlib import Path
+spec=importlib.util.spec_from_file_location("cv",sys.argv[1]);cv=importlib.util.module_from_spec(spec);spec.loader.exec_module(cv)
+b=cv.Backend(Path(sys.argv[2]),Path(sys.argv[3]))
+original=Path.rename
+def interrupt(path,destination):
+    result=original(path,destination)
+    if Path(destination).name==sys.argv[7]:os._exit(71)
+    return result
+Path.rename=interrupt
+b.prepare_local_cache(Path(sys.argv[4]),Path(sys.argv[5]),json.loads(sys.argv[6]),"480x320",())
+'''
+        result = subprocess.run([sys.executable, '-c', code, str(SCRIPT), str(backend.home), str(backend.job),
+                                 str(self.bundle), str(snapshot), json.dumps(selected), stop_after], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 71, result.stdout+result.stderr)
+
+    def test_identified_hard_interruption_recovers_before_retrying_verified_update(self):
+        source = self.prepare_local()
+        for stop_after in ('previous', 'core'):
+            backend = cv.Backend(self.root/('home-'+stop_after), self.root/('job-'+stop_after))
+            (source/'src/core/Clock.cpp').write_text('// before')
+            old_snapshot = self.root/('old-'+stop_after)
+            old, _ = backend.capture_local(source, old_snapshot)
+            core, _ = backend.prepare_local_cache(self.bundle, old_snapshot, old, '480x320', ())
+            stable_time = (core/'src/core/ApplicationCore.cpp').stat().st_mtime_ns
+            (source/'src/core/Clock.cpp').write_text('// after '+stop_after)
+            new_snapshot = self.root/('new-'+stop_after)
+            updated, _ = backend.capture_local(source, new_snapshot)
+            self.interrupted_cache_update(backend, new_snapshot, updated, stop_after)
+            self.assertTrue((core.parent/'core-update.json').exists())
+            backend.prepare_local_cache(self.bundle, new_snapshot, updated, '480x320', ())
+            self.assertFalse((core.parent/'core-update.json').exists())
+            self.assertEqual(cv.verify_snapshot(core, core/cv.SNAPSHOT_NAME)['fingerprint'], updated['fingerprint'])
+            self.assertEqual((core/'src/core/ApplicationCore.cpp').stat().st_mtime_ns, stable_time)
+
+    def test_interruption_marker_does_not_authorize_tampered_snapshot_recovery(self):
+        source = self.prepare_local()
+        old, _ = self.backend.capture_local(source, self.root/'old-snapshot')
+        core, _ = self.backend.prepare_local_cache(self.bundle, self.root/'old-snapshot', old, '480x320', ())
+        (source/'src/core/Clock.cpp').write_text('// after')
+        updated, _ = self.backend.capture_local(source, self.root/'new-snapshot')
+        self.interrupted_cache_update(self.backend, self.root/'new-snapshot', updated)
+        marker = json.loads((core.parent/'core-update.json').read_text())
+        stage = core.parent/marker['transaction']/'next'
+        (stage/'src/core/Clock.cpp').write_text('// untrusted external mutation')
+        with self.assertRaises(cv.VersionError):
+            self.backend.prepare_local_cache(self.bundle, self.root/'new-snapshot', updated, '480x320', ())
+        self.assertTrue((core.parent/'core-update.json').exists())
+        self.assertFalse(core.exists())
 
     def test_bundle_identity_ignores_zip_timestamps_but_not_source_content(self):
         first = self.backend.bundle_inventory(self.bundle)
