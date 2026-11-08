@@ -16,8 +16,16 @@ GuiSmokeCheck::GuiSmokeCheck(std::string directory):outputDirectory_(std::move(d
     {"Nuoli oikealle",none,ImGuiKey_RightArrow},{"OIKEA",screen(core::Screen::BasicView)},
     {"Nopeuden syöttö",none},
     {"Valitse nopeuskenttä",none,ImGuiKey_A,true},
-    {"Kirjoita nopeus",none,ImGuiKey_None,false,"72.5"},
+    {"Kirjoita nopeus pilkulla",none,ImGuiKey_None,false,"72,5"},
     {"Nuoli syöttökentässä",screen(core::Screen::BasicView),ImGuiKey_DownArrow},
+    {"Aseta",[](AppController& c){require(c.engine().targetSpeedKmh()==72.5);}},
+    {"Nopeuden syöttö",none},
+    {"Valitse nopeuskenttä",none,ImGuiKey_A,true},
+    {"Kirjoita virheellinen nopeus",none,ImGuiKey_None,false,"nan"},
+    {"Hylkää virheellinen nopeus",[](AppController& c){require(c.engine().targetSpeedKmh()==72.5);},ImGuiKey_Enter},
+    {"Nopeuden syöttö",none},
+    {"Valitse nopeuskenttä",none,ImGuiKey_A,true},
+    {"Kirjoita nopeus",none,ImGuiKey_None,false,"72.5"},
     {"Hyväksy nopeus",[](AppController& c){require(c.engine().targetSpeedKmh()==72.5);},ImGuiKey_Enter},
     {"36",[](AppController& c){require(c.engine().targetSpeedKmh()==36);}},
     {"Askel",[](AppController& c){require(c.engine().generatedPulseCount()==1&&c.engine().monotonicMicroseconds()==100000);}},
@@ -35,15 +43,25 @@ GuiSmokeCheck::GuiSmokeCheck(std::string directory):outputDirectory_(std::move(d
     {"OIKEA",none},{"OIKEA",none},{"OIKEA",none},
     {"OIKEA",none},{"OIKEA",none},{"OIKEA",none},{"OIKEA",none},
     {"YLÖS",none},{"OIKEA",none},{"ALAS",none},{"ALAS",none},
+#if ASKOMPU_HAS_UPSTREAM_012_UI
+    {"ALAS",none},
+#endif
     {"OIKEA",[](AppController& c){require(c.engine().application().hasRouteOrder());}},
     {"AT",[](AppController& c){require(c.engine().displayModel().atOverlay.visible);}},
     {"AT",[](AppController& c){require(!c.engine().displayModel().atOverlay.visible);}},
+#if ASKOMPU_HAS_UPSTREAM_012_UI
+    {"PISTE",[](AppController& c){require(!c.engine().displayModel().finishResult.visible);}},
+#endif
     {"PISTE",[](AppController& c){require(c.engine().displayModel().finishResult.visible);}},
     {"Aloita alusta",[](AppController& c){require(c.resetPending());}},
     {"Peruuta",[](AppController& c){require(!c.resetPending()&&c.engine().application().hasRouteOrder());}},
     {"Aloita alusta",[](AppController& c){require(c.resetPending());}},
     {"Aloita alusta##vahvista",[](AppController& c){require(c.engine().monotonicMicroseconds()==0&&c.engine().generatedPulseCount()==0&&c.paused());}},
-    {"Ohje",none},{"Tietoja simulaattorista",none},{"Tietoja simulaattorista",none},{"Sulje",none}
+    {"Ohje",none},{"Tietoja simulaattorista",none},{"Tietoja simulaattorista",none},
+    {"Sulje ohje Escillä",[](AppController& c){
+      require(c.engine().displayModel().screen==core::Screen::StartupTimeEntry&&c.log().size()==1);
+    },ImGuiKey_Escape},
+    {"Ohje",none},{"Sulje",none}
   };
 }
 void GuiSmokeCheck::beforeFrame(SimulatorView& view,AppController& c,SDL_Window* window) {
@@ -103,6 +121,10 @@ void GuiSmokeCheck::beforeFrame(SimulatorView& view,AppController& c,SDL_Window*
   }
   else if(phase_==2) {
     actions_[action_].verify(c);
+    if(action.button=="Hylkää virheellinen nopeus")require(*view.speedInputError());
+    if(action.button=="Hyväksy nopeus")require(!*view.speedInputError());
+    if(action.button=="Ohje")require(view.helpVisible());
+    if(action.button=="Sulje ohje Escillä"||action.button=="Sulje")require(!view.helpVisible());
     std::cout<<"Hyväksytty ohjain: "<<actions_[action_].button<<'\n';
     if(action_>0&&action.button=="AT"&&actions_[action_-1].button=="AT"){snapshot_=1;ImGui::GetIO().AddMousePosEvent(5,5);}
     if(action.button=="Tietoja simulaattorista"&&actions_[action_-1].button=="Ohje")snapshot_=3;

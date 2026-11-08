@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 #include "imgui.h"
+#include "CoreBuildInfo.h"
+#include "FolderBrowser.h"
 
 namespace simulator::desktop {
 struct CoreVersion { std::string kind,label,sha,date,subject,body,tag; };
@@ -25,6 +27,8 @@ class CoreVersionView {
   const std::string& phase() const { return phase_; }
   const std::string& operation() const { return operation_; }
   bool localSourceReady() const { return localChecked_; }
+  const std::string& localSourcePath() const { return checkedLocalPath_; }
+  bool folderSourceReady() const { return !folderPathEdited_&&browser_.hasCore(); }
  private:
   void start(const std::string& operation, const std::vector<std::string>& extra = {});
   bool spawn(const std::vector<std::string>& arguments);
@@ -39,8 +43,10 @@ class CoreVersionView {
   void folderPicker();
   void navigateFolder(const std::filesystem::path& path);
   void saveLocalPreference();
+  bool readyMatchesSelection() const;
   std::filesystem::path home_,script_,bundle_,executable_,job_;
-  std::string upstream_,operation_,phase_="idle",message_,error_,log_,readyArtifact_,readyLabel_,previous_;
+  std::string upstream_,operation_,phase_="idle",message_,error_,log_,previous_,readyWarning_;
+  CoreBuildInfo ready_;
   std::vector<CoreVersion> versions_;
   std::vector<std::pair<std::string,bool>> requirements_;
   CoreVersion selected_;
@@ -49,17 +55,19 @@ class CoreVersionView {
   char exactSha_[96] = {};
   char filter_[160] = {};
   char localPath_[2048] = {};
+  char folderPath_[2048] = {};
   std::string checkedLocalPath_,localSubject_,localSha_,localFingerprint_;
-  std::filesystem::path browsePath_;
-  std::vector<std::filesystem::path> browseFolders_;
-  std::string browseError_;
+  FolderBrowser browser_;
+  std::filesystem::path folderHome_;
   int category_ = 0;
   int sourceMode_ = 1, profile_ = 1;
   bool localChecked_ = false,localDirty_ = false,localHasGit_ = false,folderOpen_ = false;
+  bool folderPathEdited_ = false;
   bool scrollTop_ = false;
   bool initialized_ = false, running_ = false, requirementsOk_ = false, closeRequested_ = false;
   bool restartPending_ = false, rollbackPending_ = false;
   bool readyExpanded_ = true;
+  bool readyIsActive_ = false;
   std::chrono::steady_clock::time_point began_,lastRead_;
 #ifdef _WIN32
   void* process_ = nullptr;

@@ -46,6 +46,9 @@ void applyDesktopStyle(float scale) {
   s.Colors[ImGuiCol_WindowBg]={.045f,.063f,.075f,1};
   s.Colors[ImGuiCol_ChildBg]={.07f,.094f,.11f,1};
   s.Colors[ImGuiCol_PopupBg]={.085f,.11f,.125f,1};
+  s.Colors[ImGuiCol_TitleBg]={.10f,.15f,.17f,1};
+  s.Colors[ImGuiCol_TitleBgActive]={.14f,.19f,.21f,1};
+  s.Colors[ImGuiCol_ModalWindowDimBg]={0,0,0,.45f};
   s.Colors[ImGuiCol_Text]={.91f,.95f,.95f,1};s.Colors[ImGuiCol_TextDisabled]=muted;
   s.Colors[ImGuiCol_FrameBg]={.11f,.15f,.17f,1};
   s.Colors[ImGuiCol_FrameBgHovered]={.15f,.22f,.24f,1};
@@ -87,7 +90,10 @@ void SimulatorView::transport() {
   hint("Välilyönti: keskeytä tai jatka simuloitua aikaa. Ajoneuvon nopeus säilyy tauolla.");
   ImGui::SameLine();if(button("Askel",{82*u,40*u}))controller_.step();
   hint("Keskeyttää jatkuvan ajon ja etenee täsmälleen 0,1 sekuntia. Pikanäppäin: N.");
-  ImGui::SameLine();if(button("Aloita alusta",{142*u,40*u}))controller_.requestReset();
+  ImGui::SameLine();if(button("Aloita alusta",{142*u,40*u})){
+    controller_.requestReset();
+    if(!controller_.resetPending())speedInput_.accept(controller_.engine().targetSpeedKmh());
+  }
   if(singleRow)ImGui::SameLine(0,28*u);
   else gap(4);
   ImGui::BeginGroup();
@@ -138,6 +144,10 @@ void SimulatorView::instrument() {
     label("Simulaattorin esikatselunäkymä");
     hint("Valitussa ASkompu-versiossa ei ole yhteistä REAL-rendereriä. Oikea ASkompu-logiikka on käytössä, mutta tämä näkymä ei ole firmwaren tarkka pikselikuva.");
   }
+  if(model.screen==core::Screen::StartupTimeEntry){
+    gap(3);
+    ImGui::TextWrapped("Aseta kellonaika: nuolet ylös/alas muuttavat arvoa, oikea siirtyy minuutteihin ja hyväksyy ajan.");
+  }
 }
 
 void SimulatorView::vehicle() {
@@ -152,22 +162,38 @@ void SimulatorView::vehicle() {
   ImGui::SameLine();label("km/h");
   float value=static_cast<float>(controller_.engine().targetSpeedKmh());
   ImGui::SetNextItemWidth(-1);
-  if(ImGui::SliderFloat("##Nopeus",&value,0,200,"%.1f km/h",ImGuiSliderFlags_AlwaysClamp|ImGuiSliderFlags_NoInput))controller_.setSpeed(value);
+  if(ImGui::SliderFloat("##Nopeus",&value,0,200,"%.1f km/h",ImGuiSliderFlags_AlwaysClamp|ImGuiSliderFlags_NoInput)){
+    controller_.setSpeed(value);speedInput_.accept(controller_.engine().targetSpeedKmh());
+  }
   remember("Nopeus");hint("Aseta ajoneuvon tavoitenopeus. Muutos kulkee simulaattorin pulssigeneraattorin kautta.");
-  ImGui::SetNextItemWidth(150*u);
-  if(!ImGui::IsAnyItemActive())speedInput_=static_cast<float>(controller_.engine().targetSpeedKmh());
-  if(ImGui::InputFloat("km/h##syotto",&speedInput_,0,0,"%.1f",ImGuiInputTextFlags_EnterReturnsTrue))
-    controller_.setSpeed(std::clamp(speedInput_,0.0f,200.0f));
-  remember("Nopeuden syöttö");hint("Kirjoita nopeus ja hyväksy Enterillä. Sallitut arvot 0–200 km/h.");
+  speedInput_.sync(controller_.engine().targetSpeedKmh(),ImGui::IsAnyItemActive());
+  const float applyWidth=70*u;
+  ImGui::SetNextItemWidth(std::min(150*u,ImGui::GetContentRegionAvail().x-applyWidth-
+      ImGui::CalcTextSize("km/h").x-ImGui::GetStyle().ItemInnerSpacing.x-ImGui::GetStyle().ItemSpacing.x));
+  const bool enter=ImGui::InputText("km/h##syotto",speedInput_.text(),speedInput_.capacity(),
+      ImGuiInputTextFlags_EnterReturnsTrue);
+  if(ImGui::IsItemEdited())speedInput_.edited();
+  remember("Nopeuden syöttö");hint("Kirjoita nopeus pisteellä tai pilkulla ja hyväksy Enterillä tai Aseta-painikkeella. Sallitut arvot 0–200 km/h.");
+  ImGui::SameLine();const bool apply=button("Aseta",{applyWidth,0},speedInput_.dirty());
+  if(enter||apply){
+    const auto parsed=speedInput_.submit();
+    if(parsed.valid){controller_.setSpeed(parsed.kmh);speedInput_.accept(controller_.engine().targetSpeedKmh());}
+  }
+  if(*speedInput_.error()){
+    ImGui::PushStyleColor(ImGuiCol_Text,amber);ImGui::TextWrapped("%s",speedInput_.error());ImGui::PopStyleColor();
+  }
   gap(4);
   const float presetWidth=(ImGui::GetContentRegionAvail().x-30*u)/4;
   for(int preset:{0,36,60,120}) {
     if(preset)ImGui::SameLine();
-    if(button(std::to_string(preset).c_str(),{presetWidth,34*u}))
-      controller_.setSpeed(preset);
+    if(button(std::to_string(preset).c_str(),{presetWidth,34*u})){
+      controller_.setSpeed(preset);speedInput_.accept(controller_.engine().targetSpeedKmh());
+    }
   }
   gap(5);
-  if(button("Pysäytä",{-1,40*u}))controller_.stopVehicle();
+  if(button("Pysäytä",{-1,40*u})){
+    controller_.stopVehicle();speedInput_.accept(controller_.engine().targetSpeedKmh());
+  }
   hint("Asettaa ajoneuvon nopeudeksi 0 km/h. Simuloitu aika jatkuu. Pikanäppäin: S.");
   bool reverse=controller_.engine().reverseActive();
   if(ImGui::Checkbox("Peruutus",&reverse))controller_.setReverse(reverse);
@@ -301,14 +327,18 @@ void SimulatorView::dialogs() {
     ImGui::TextWrapped("Nykyinen ajo, tapahtumat ja ajon aikana tehdyt asetukset poistuvat. ASkompu palaa kellon alustukseen.");
     gap(10);
     if(button("Peruuta",{140*u,40*u})) {controller_.cancelReset();ImGui::CloseCurrentPopup();}
-    ImGui::SameLine();if(button("Aloita alusta##vahvista",{180*u,40*u},true)){controller_.confirmReset();ImGui::CloseCurrentPopup();}
+    ImGui::SameLine();if(button("Aloita alusta##vahvista",{180*u,40*u},true)){
+      controller_.confirmReset();speedInput_.accept(controller_.engine().targetSpeedKmh());ImGui::CloseCurrentPopup();
+    }
     if(ImGui::IsKeyPressed(ImGuiKey_Escape)){controller_.cancelReset();ImGui::CloseCurrentPopup();}
     ImGui::EndPopup();
   }
   if(helpOpen_){ImGui::OpenPopup("Käyttöohje");helpOpen_=false;}
+  helpVisible_=false;
   ImGui::SetNextWindowSize({std::min(590*u,ImGui::GetIO().DisplaySize.x-30*u),0},ImGuiCond_Always);
   ImGui::SetNextWindowSizeConstraints({0,0},{FLT_MAX,ImGui::GetIO().DisplaySize.y-30*u});
   if(ImGui::BeginPopupModal("Käyttöohje",nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {
+    helpVisible_=true;
     ImGui::TextWrapped("Aloita asettamalla kellonaika ASkompun painikkeilla. OIKEA siirtyy tunneista minuutteihin ja hyväksyy ajan. Avaa sen jälkeen ajomääräys YLÖS/ALAS-painikkeella avautuvasta valikosta.");
     gap();ImGui::TextWrapped("Nopeus ohjaa ajoneuvoa. Pysäytä asettaa nopeudeksi nollan; Keskeytä pysäyttää simuloidun ajan. Askel etenee aina 0,1 sekuntia. Aloita alusta poistaa nykyisen ajon myös muistista.");
     gap();ImGui::TextWrapped("Näppäimistö: nuolet = suuntapainikkeet, P = PISTE, A = AT, R = peruutus, S = pysäytä, N = askel, välilyönti = keskeytä/jatka, Esc = pitkä VASEN. Pikanäppäimet eivät toimi syöttökenttää muokattaessa.");
@@ -329,7 +359,9 @@ void SimulatorView::dialogs() {
       ImGui::TextWrapped("Simulaattorin tiiviste: %.16s",build::simulatorFingerprint);
       ImGui::TreePop();
     }
-    gap();if(button("Sulje",{140*u,40*u},true))ImGui::CloseCurrentPopup();
+    gap();if(button("Sulje",{140*u,40*u},true)||ImGui::IsKeyPressed(ImGuiKey_Escape)){
+      helpVisible_=false;ImGui::CloseCurrentPopup();
+    }
     ImGui::EndPopup();
   }
 }

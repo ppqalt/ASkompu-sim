@@ -11,10 +11,12 @@ class CoreVersionSmokeCheck {
   bool finished() const{return finished_;}
  private:
   bool click(SimulatorView& view,const char* title);
+  bool replaceText(SimulatorView& view,const char* title,const std::string& value);
   void advance(){++step_;clickPhase_=0;settle_=0;}
   std::string directory_,capture_;
   bool build_=false,local_=false,finished_=false;
   unsigned step_=0,clickPhase_=0,settle_=0;
+  unsigned textPhase_=0;
   double started_=0;
 };
 }

@@ -31,13 +31,20 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Hae julkaisuun lukittu Mikky100:n ASkompu 0.1.2
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: Mikky100/ASkompu
+          ref: 427e4026ebc7c510558e847b01ac7bc98c4147bd
+          path: upstream-core
+          persist-credentials: false
       - name: Linuxin näyttöriippuvuudet
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libx11-dev libxext-dev libxcursor-dev libxi-dev libxrandr-dev libxss-dev
       - name: Upstream-pohjan tunnistus (vain fetch)
         run: git fetch --no-tags https://github.com/Mikky100/ASkompu.git main:refs/remotes/upstream/main
       - name: Määritä
-        run: cmake --preset ${{ matrix.preset }}
+        run: cmake --preset ${{ matrix.preset }} -DASKOMPU_CORE_ROOT=${{ github.workspace }}/upstream-core -DASKOMPU_CORE_REVISION=427e4026ebc7c510558e847b01ac7bc98c4147bd
       - name: Rakenna
         run: cmake --build --preset ${{ matrix.preset }}
       - name: Testaa kaikki moottori-, ohjain- ja host-testit

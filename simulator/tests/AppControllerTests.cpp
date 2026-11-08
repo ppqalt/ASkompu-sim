@@ -100,10 +100,14 @@ void boundedLog() {
   AppController c; acceptTime(c); c.press(ButtonId::At); c.press(ButtonId::At);
   size_t domainEntries=0;
   for (const auto& entry:c.log()) if (entry.applicationEvent) ++domainEntries;
-  CHECK(domainEntries == 2);
+  CHECK(domainEntries == (ASKOMPU_HAS_UPSTREAM_012_UI ? 1U : 2U));
   const auto& event=*c.engine().application().eventRepository().at(0);
+#if ASKOMPU_HAS_UPSTREAM_012_UI
+  CHECK(!event.cancelled);
+#else
   CHECK(event.cancelled);
   CHECK(simulator::desktop::eventDescription(event).find("peruttu") != std::string::npos);
+#endif
   for (unsigned i=0; i<1000; ++i) c.setSpeed(i%2 ? 36:60);
   CHECK(c.log().size() == AppController::logCapacity);
 }

@@ -4,7 +4,7 @@ option(ASKOMPU_STATIC_MSVC_RUNTIME "Linkitä MSVC-ajonaikaiskirjasto staattisest
 if(ASKOMPU_STATIC_MSVC_RUNTIME)
   set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()
-project(ASkompuSimulator VERSION 1.0.0 LANGUAGES C CXX)
+project(ASkompuSimulator VERSION 1.1.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -47,6 +47,11 @@ add_library(askompu_core STATIC
 )
 target_include_directories(askompu_core PUBLIC
   ${ASKOMPU_CORE_ROOT}/src ${ASKOMPU_CORE_ROOT}/include)
+if(EXISTS "${ASKOMPU_CORE_ROOT}/src/ui/TripFormatting.h")
+  target_compile_definitions(askompu_core PUBLIC ASKOMPU_HAS_UPSTREAM_012_UI=1)
+else()
+  target_compile_definitions(askompu_core PUBLIC ASKOMPU_HAS_UPSTREAM_012_UI=0)
+endif()
 
 # REAL comes entirely from the selected ASkompu tree. No firmware graphics are
 # copied into this desktop branch; older cores retain the original preview.
@@ -87,6 +92,7 @@ endif()
 
 include(CTest)
 add_library(askompu_desktop_controller STATIC ui/AppController.cpp ui/Finnish.cpp
+  ui/FolderBrowser.cpp ui/CoreBuildInfo.cpp ui/SpeedInput.cpp
   ${ASKOMPU_CORE_ROOT}/src/ui/RouteOrderFormatting.cpp)
 target_link_libraries(askompu_desktop_controller PUBLIC askompu_simulator)
 target_include_directories(askompu_desktop_controller PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/compat")
@@ -119,6 +125,12 @@ if(BUILD_TESTING)
   add_executable(controller_tests tests/AppControllerTests.cpp)
   target_link_libraries(controller_tests PRIVATE askompu_desktop_controller)
   add_test(NAME kayttoliittyman_ohjaus COMMAND controller_tests)
+  add_executable(desktop_workflow_tests tests/DesktopWorkflowTests.cpp)
+  target_link_libraries(desktop_workflow_tests PRIVATE askompu_desktop_controller)
+  add_test(NAME paikallinen_kayttopolku COMMAND desktop_workflow_tests)
+  add_executable(speed_input_tests tests/SpeedInputTests.cpp)
+  target_link_libraries(speed_input_tests PRIVATE askompu_desktop_controller)
+  add_test(NAME nopeussyotto COMMAND speed_input_tests)
   add_executable(simulator_tests tests/SimulatorEngineTests.cpp)
   target_link_libraries(simulator_tests PRIVATE askompu_simulator)
   add_test(NAME simulaattori COMMAND simulator_tests)

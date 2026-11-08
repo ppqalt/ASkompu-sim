@@ -356,7 +356,11 @@ void testButtonsAndDisplay() {
   e.press(ButtonId::At);
   CHECK(!e.displayModel().atOverlay.visible);
   CHECK(e.application().eventRepository().at(e.application().eventRepository().count()-1)
+#if ASKOMPU_HAS_UPSTREAM_012_UI
+            ->eventType == domain::DomainEventType::AT);
+#else
             ->eventType == domain::DomainEventType::AT_CANCELLED);
+#endif
 }
 
 void testCalibrationSave() {
@@ -409,9 +413,12 @@ void testJatFinishAndScore() {
   auto& first = initial.routeOrder.segments[0];
   first.value = 10; first.pointTypeAtEnd = domain::PointType::JAT;
   first.hasJatType = true; first.jatType = domain::JatType::MANNED_JAT;
-  first.hasJatOffsetMinutes = true;
+  first.hasJatOffsetMinutes = !ASKOMPU_HAS_UPSTREAM_012_UI;
   SimulatorEngine e(initial);
   acceptTime(e);
+#if ASKOMPU_HAS_UPSTREAM_012_UI
+  e.press(ButtonId::Point); // Uusin ydin virittää ensimmäisen pistevälin erikseen.
+#endif
   e.advanceMilliseconds(12000); e.press(ButtonId::Point);
   CHECK(e.application().screen() == core::Screen::JatResult);
   CHECK(e.application().competition().totalPoints() == 2);
@@ -420,6 +427,9 @@ void testJatFinishAndScore() {
   e.step(); CHECK(e.application().screen() == core::Screen::StartTimeEdit);
   e.press(ButtonId::Right);
   CHECK(e.application().competition().state() == domain::CompetitionState::WAIT_START);
+#if ASKOMPU_HAS_UPSTREAM_012_UI
+  e.press(ButtonId::Point);
+#endif
   e.advanceMilliseconds(43000);
   CHECK(e.application().competition().state() == domain::CompetitionState::RUNNING);
   e.advanceMilliseconds(20000); e.press(ButtonId::Point);
@@ -641,10 +651,17 @@ void testRouteAndSettingsSaves() {
   // TIME 00:01, sitten MAALI.
   for (unsigned i = 0; i < 4; ++i) e.press(ButtonId::Right);
   e.press(ButtonId::Up); e.press(ButtonId::Right);
-  e.press(ButtonId::Down); e.press(ButtonId::Down); e.press(ButtonId::Right);
+  e.press(ButtonId::Down); e.press(ButtonId::Down);
+#if ASKOMPU_HAS_UPSTREAM_012_UI
+  e.press(ButtonId::Down);
+#endif
+  e.press(ButtonId::Right);
   CHECK(e.application().hasRouteOrder());
   CHECK(e.application().currentRouteOrder()->startMinute == 1);
   CHECK(e.application().competition().state() == domain::CompetitionState::WAIT_START);
+#if ASKOMPU_HAS_UPSTREAM_012_UI
+  e.press(ButtonId::Point);
+#endif
   e.advanceMilliseconds(60000);
   CHECK(e.application().competition().state() == domain::CompetitionState::RUNNING);
   e.advanceMilliseconds(1000); e.press(ButtonId::Point);

@@ -6,6 +6,7 @@
 #include "AppController.h"
 #include "CoreVersionView.h"
 #include "DeviceDisplay.h"
+#include "SpeedInput.h"
 
 namespace simulator::desktop {
 struct HitRegion { ImVec2 minimum, maximum; };
@@ -22,7 +23,11 @@ class SimulatorView {
   const std::string& corePhase() const { return coreVersions_.phase(); }
   const std::string& coreOperation() const { return coreVersions_.operation(); }
   bool localSourceReady() const { return coreVersions_.localSourceReady(); }
+  const std::string& localSourcePath() const { return coreVersions_.localSourcePath(); }
+  bool folderSourceReady() const { return coreVersions_.folderSourceReady(); }
   DeviceRendererMode rendererMode() const { return rendererMode_; }
+  const char* speedInputError() const { return speedInput_.error(); }
+  bool helpVisible() const { return helpVisible_; }
  private:
   bool button(const char* title, ImVec2 size = {0,0}, bool accent = false);
   void remember(const char* title);
@@ -41,9 +46,10 @@ class SimulatorView {
   CoreVersionView coreVersions_;
   bool corePage_ = false;
   bool helpOpen_ = false;
+  bool helpVisible_ = false;
   bool followLog_ = true;
   bool showApplicationOnly_ = false;
-  float speedInput_ = 0;
+  SpeedInput speedInput_;
   std::map<std::string, HitRegion> hitRegions_;
 };
 void applyDesktopStyle(float scale);

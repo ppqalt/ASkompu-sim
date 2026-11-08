@@ -34,6 +34,10 @@ const char* screenName(core::Screen s) {
     case core::Screen::OrderAccessPrompt: return "Ajomääräyksen valinta";
     case core::Screen::OrderEdit: return "Ajomääräyksen muokkaus";
     case core::Screen::Diagnostics: return "Diagnostiikka";
+#if ASKOMPU_HAS_UPSTREAM_012_UI
+    case core::Screen::PulseDiagnostics: return "Pulssidiagnostiikka";
+    case core::Screen::TripResetNotice: return "Trip nollattu";
+#endif
   }
   return "Näyttö";
 }

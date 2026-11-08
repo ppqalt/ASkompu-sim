@@ -16,6 +16,16 @@ bool CoreVersionSmokeCheck::click(SimulatorView& view,const char* title){
   if(clickPhase_==1){io.AddMouseButtonEvent(0,false);clickPhase_=2;return false;}
   return true;
 }
+bool CoreVersionSmokeCheck::replaceText(SimulatorView& view,const char* title,const std::string& value){
+  auto& io=ImGui::GetIO();
+  if(textPhase_==0){
+    if(!click(view,title))return false;
+    textPhase_=1;clickPhase_=settle_=0;return false;
+  }
+  if(textPhase_==1){io.AddKeyEvent(ImGuiMod_Ctrl,true);io.AddKeyEvent(ImGuiKey_A,true);textPhase_=2;settle_=0;return false;}
+  if(textPhase_==2){io.AddKeyEvent(ImGuiKey_A,false);io.AddKeyEvent(ImGuiMod_Ctrl,false);io.AddInputCharactersUTF8(value.c_str());textPhase_=3;settle_=0;return false;}
+  textPhase_=0;return true;
+}
 void CoreVersionSmokeCheck::beforeFrame(SimulatorView& view,SDL_Window* window){
   if(!started_)started_=ImGui::GetTime();
   if(ImGui::GetTime()-started_>(build_?1800:90))throw std::runtime_error("Ytimen versionvalitsimen GUI-testi ylitti aikarajan");
@@ -63,18 +73,33 @@ void CoreVersionSmokeCheck::beforeFrame(SimulatorView& view,SDL_Window* window){
     case 30:capture_="paikallinen-kansio.bmp";advance();break;
     case 31:if(click(view,"Valitse kansio…"))advance();break;
     case 32:capture_="paikallinen-kansiovalitsin.bmp";advance();break;
-    case 33:if(click(view,"Käytä tätä kansiota"))advance();break;
+    case 33:if(replaceText(view,"Kansion polku",(std::filesystem::temp_directory_path()/"askompu-missing-folder-gui-check").u8string()))advance();break;
     case 34:
+      if(view.folderSourceReady())throw std::runtime_error("Muokattu polku jätti vanhan kansion valittavaksi");
+      ImGui::GetIO().AddKeyEvent(ImGuiKey_Enter,true);advance();break;
+    case 35:ImGui::GetIO().AddKeyEvent(ImGuiKey_Enter,false);advance();break;
+    case 36:
+      if(view.folderSourceReady())throw std::runtime_error("Puuttuva polku hyväksyttiin lähdekansioksi");
+      capture_="paikallinen-kansion-virhe.bmp";advance();break;
+    case 37:if(click(view,"Koti"))advance();break;
+    case 38:if(replaceText(view,"Kansion polku",view.localSourcePath()))advance();break;
+    case 39:ImGui::GetIO().AddKeyEvent(ImGuiKey_Enter,true);advance();break;
+    case 40:ImGui::GetIO().AddKeyEvent(ImGuiKey_Enter,false);advance();break;
+    case 41:
+      if(!view.folderSourceReady())throw std::runtime_error("Kansiovalitsimen kelvollinen polku ei palautunut");
+      if(click(view,"Käytä tätä kansiota"))advance();
+      break;
+    case 42:
       if(view.corePhase()=="done"&&view.localSourceReady()){SDL_SetWindowSize(window,780,660);advance();}
       else if(view.corePhase()=="failed")throw std::runtime_error("Kansiovalitsimen lähde ei läpäissyt tarkistusta");
       break;
-    case 35:capture_="paikallinen-pieni.bmp";advance();break;
-    case 36:
+    case 43:capture_="paikallinen-pieni.bmp";advance();break;
+    case 44:
       if(!build_){finished_=true;std::cout<<"Hyväksytty: paikallinen ASkompu, kansiovalitsin ja pieni ikkuna\n";}
       else{SDL_SetWindowSize(window,1380,960);advance();}
       break;
-    case 37:if(click(view,"Rakenna ja testaa"))advance();break;
-    case 38:
+    case 45:if(click(view,"Rakenna ja testaa"))advance();break;
+    case 46:
       if(view.corePhase()=="ready"){capture_="paikallinen-valmis.bmp";step_=18;clickPhase_=settle_=0;}
       else if(view.corePhase()=="failed")throw std::runtime_error("Paikallinen rakennus tai sen testit epäonnistuivat");
       break;

@@ -11,6 +11,9 @@
 #include "DisplayFormatting.h"
 #include "ui/DisplayLayout.h"
 #include "ui/RouteOrderFormatting.h"
+#if ASKOMPU_HAS_UPSTREAM_012_UI
+#include "ui/TripFormatting.h"
+#endif
 
 namespace simulator::desktop {
 namespace {
@@ -36,7 +39,16 @@ struct Canvas {
   void sub(const std::string& value) {text(value,12,216,456,40,19);}
   void footer(const std::string& value) {text(value,8,288,464,27,12);}
 };
-std::string trip(int64_t mm) {char b[48];ui::formatTrip(b,sizeof(b),mm);return b;}
+std::string trip(int64_t mm, bool tenMeterPrecision) {
+  char b[48];
+#if ASKOMPU_HAS_UPSTREAM_012_UI
+  ui::formatTrip(b,sizeof(b),mm,tenMeterPrecision);
+#else
+  (void)tenMeterPrecision;
+  ui::formatTrip(b,sizeof(b),mm);
+#endif
+  return b;
+}
 std::string delta(int64_t s) {char b[48];ui::formatDelta(b,sizeof(b),s);return b;}
 std::string segmentValue(const domain::SegmentDefinition& s) {
   char b[48];ui::formatSegmentValue(b,sizeof(b),s);return b;
@@ -54,12 +66,17 @@ void basic(Canvas& c,const core::DisplayModel& m) {
   }
   const auto layout=ui::layoutFor(480,320);
   const auto& t=layout.trip1;
+#if ASKOMPU_HAS_UPSTREAM_012_UI
+  const bool tenMeterPrecision=m.tripTenMeterPrecision;
+#else
+  const bool tenMeterPrecision=false;
+#endif
   if(m.tripDisplayMode==domain::TripDisplayMode::BOTH) {
-    c.text(trip(m.trip1.distanceMillimeters),t.x,t.y,t.width/2.0f,t.height,54);
-    c.text(trip(m.trip2.distanceMillimeters),t.x+t.width/2.0f,t.y,t.width/2.0f,t.height,54);
+    c.text(trip(m.trip1.distanceMillimeters,tenMeterPrecision),t.x,t.y,t.width/2.0f,t.height,54);
+    c.text(trip(m.trip2.distanceMillimeters,tenMeterPrecision),t.x+t.width/2.0f,t.y,t.width/2.0f,t.height,54);
   } else {
     c.text(trip(m.tripDisplayMode==domain::TripDisplayMode::TRIP_2?
-                m.trip2.distanceMillimeters:m.trip1.distanceMillimeters),t.x,t.y,t.width,t.height,76);
+                m.trip2.distanceMillimeters:m.trip1.distanceMillimeters,tenMeterPrecision),t.x,t.y,t.width,t.height,76);
   }
   const auto& clock=layout.clock;
   c.text(timeText(m.clock),clock.x,clock.y,clock.width,clock.height,23);
@@ -107,9 +124,20 @@ void order(Canvas& c,const core::OrderDisplayModel& m) {
         "NOPEUS":e.enteringMittisTime?"MITTIS AIKA":"MITTIS METRIÄ";
       ui::formatEditableRouteOrderValue(text,sizeof(text),e);value=text;break;
     case route::EditorPhase::CONTINUATION:
-      title="JATKOTOIMINTO";value=e.continuation==0?"SEURAAVA":e.continuation==1?"JAT":"MAALI";break;
+      title="JATKOTOIMINTO";
+#if ASKOMPU_HAS_UPSTREAM_012_UI
+      value=e.continuation==0?"AIKA":e.continuation==1?"NOPEUS":
+            e.continuation==2?"MITTIS":e.continuation==3?"MAALI":"JAT";
+#else
+      value=e.continuation==0?"SEURAAVA":e.continuation==1?"JAT":"MAALI";
+#endif
+      break;
     case route::EditorPhase::JAT_TYPE:title="JAT-TYYPPI";value=jatName(e.jatType);break;
     case route::EditorPhase::JAT_OFFSET:title="JAT LISÄAIKA";value=delta(e.jatOffsetMinutes)+" min";break;
+#if ASKOMPU_HAS_UPSTREAM_012_UI
+    case route::EditorPhase::STAGE_SELECT:
+      title="JAKSON VALINTA"; value=std::to_string(e.selectedStage)+" / "+std::to_string(e.stageCount);break;
+#endif
     case route::EditorPhase::BROWSE:
       if(m.showsStartTime) {std::snprintf(text,sizeof(text),"LÄHTÖ %02u:%02u",e.startHour,e.startMinute);value=text;}
       else if(m.hasSelectedSegment) {
@@ -204,6 +232,23 @@ void drawLegacyDeviceDisplay(const core::DisplayModel& m,ImVec2 origin,ImVec2 si
       c.title("AJOMÄÄRÄYS");c.main(m.orderAccess.selectedAction==core::OrderAccessAction::Edit?"MUOKKAA AJOMÄÄRÄYSTÄ":"UUSI AJOMÄÄRÄYS",36);
       c.footer("VASEN: PALAA   YLÖS/ALAS: VALITSE   OIKEA: JATKA");break;
     case core::Screen::OrderEdit:order(c,m.order);break;
+#if ASKOMPU_HAS_UPSTREAM_012_UI
+    case core::Screen::TripResetNotice:
+      c.main("Nollattu",48);break;
+    case core::Screen::PulseDiagnostics: {
+      const auto& d=m.pulseDiagnostics;
+      c.title("PULSSIDIAGNOSTIIKKA");
+      const std::string lines[]={"Havaitut  "+std::to_string(d.observed),
+        "Hyväksytyt  "+std::to_string(d.accepted)+"   Hylätyt  "+std::to_string(d.rejected),
+        "Välitetyt  "+std::to_string(d.delivered),
+        "Pulssiväli  "+std::to_string(d.acceptedIntervalUs)+" µs",
+        "Min / max  "+std::to_string(d.minimumAcceptedUs)+" / "+std::to_string(d.maximumAcceptedUs)+" µs",
+        "Pulssin ikä  "+std::to_string(m.pulseDiagnosticAgeUs)+" µs",
+        "Kalibrointi  "+std::to_string(m.pulseDiagnosticCalibration)+" mm/pulssi"};
+      for(unsigned i=0;i<7;++i)c.text(lines[i],18,52+i*31,444,30,21,false);
+      c.footer("VASEN: PALAA   ALAS: NOLLAA   OIKEA: USB");break;
+    }
+#endif
     case core::Screen::Diagnostics: {
       const auto& d=m.diagnostics;c.title("DIAGNOSTIIKKA");
       const std::string lines[]={"Pulssit "+std::to_string(d.totalPulseCount),
