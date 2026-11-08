@@ -46,7 +46,7 @@ try {
             throw "Paketin ajotarkistus epäonnistui: $(Get-Content $stderr -Raw)"
         }
         $result = Get-Content $stdout -Raw -Encoding utf8
-        if ($mode -eq '--versio' -and $result -notmatch 'ASkompu-simulaattori 1\.0\.0') { throw 'Versiotuloste puuttuu.' }
+        if ($mode -eq '--versio' -and $result -notmatch 'ASkompu-simulaattori 1\.1\.1') { throw 'Versiotuloste puuttuu tai on väärä.' }
         if ($mode -eq '--tarkista' -and $result -notmatch 'pienen ikkunan vieritys') { throw 'GUI-tarkistus ei valmistunut.' }
         if ($mode -eq '--tarkista-ytimenvalitsin' -and $result -notmatch 'pieni ikkuna ja virhetila') { throw 'Versionvalitsimen GUI-tarkistus ei valmistunut.' }
         Write-Output $result
